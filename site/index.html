@@ -235,6 +235,7 @@
 (function () {
   var EMBED = (function () { try { return window.self !== window.top; } catch (e) { return true; } })();
   if (EMBED) document.documentElement.classList.add('embed');
+  var BUILD = '__BUILD__';
   var DATA_URL = 'data.enc.json', KEY = 'wykesLeadsCode', state = { data: null, filter: 'all', code: '' };
   var $ = function (id) { return document.getElementById(id); };
   var store = {
@@ -275,7 +276,12 @@
   async function load(code) {
     var res = await fetch(DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });
     if (!res.ok) throw new Error('fetch');
-    return decrypt(await res.json(), code);
+    var file = await res.json();
+    // A newer version of this page has been published: load it (a new URL skips the browser's cached copy).
+    if (file.build && BUILD.indexOf('__') !== 0 && file.build !== BUILD && new URLSearchParams(location.search).get('v') !== file.build) {
+      location.replace(location.pathname + '?v=' + file.build); return new Promise(function () {});
+    }
+    return decrypt(file, code);
   }
 
   var LABEL = { new: 'New', owner: 'Waiting on you', booked: 'Visit booked', quote: 'Quote sent', won: 'Won', lost: 'Lost', nurture: 'Not ready yet' };

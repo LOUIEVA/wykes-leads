@@ -250,6 +250,9 @@ const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, k
 const b64 = u => Buffer.from(u).toString('base64');
 await mkdir(OUT, { recursive: true });
 await cp('site', OUT, { recursive: true });
-await writeFile(`${OUT}/data.enc.json`, JSON.stringify({ v: 1, iter: ITER, salt: b64(salt), iv: b64(iv), ct: b64(ct), at: data.generatedAt }));
+const BUILD = (process.env.GITHUB_SHA || 'local').slice(0, 12);
+const { readFile } = await import('node:fs/promises');
+await writeFile(`${OUT}/index.html`, (await readFile(`${OUT}/index.html`, 'utf8')).replace('__BUILD__', BUILD));
+await writeFile(`${OUT}/data.enc.json`, JSON.stringify({ v: 1, iter: ITER, salt: b64(salt), iv: b64(iv), ct: b64(ct), at: data.generatedAt, build: BUILD }));
 console.log(`OK: ${leads.length} leads (contacts), ${opps.length} deals in ${pipelines.length} pipelines, ${Object.keys(convByContact).length} conversations, ${reminders.length} open reminders, ${leads.reduce((n, l) => n + (l.noteCount || 0), 0)} notes, ${visits.length} upcoming visits, ${calls} API calls`);
 console.log('KPIs', JSON.stringify(kpis));
