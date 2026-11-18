@@ -59,6 +59,62 @@ const oppByContact = {};
 opps.sort((a, b) => ts(b.updatedAt || b.createdAt) - ts(a.updatedAt || a.createdAt))
   .forEach(o => { const cid = o.contactId || (o.contact && o.contact.id); if (cid && !oppByContact[cid]) oppByContact[cid] = o; });
 
+// 3b. Apply updates sent from the dashboard. They arrive as notes starting with "[Dashboard]"
+// (written by the GHL inbound-webhook workflow). Each is applied once, then rewritten with a tick.
+const DETAIL_LIMIT = 80;
+const stripHtml = h => String(h || '').replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').trim();
+const notesByContact = {};
+const ACTIONS = {
+  called:        { tag: 'called' },
+  no_answer:     { tag: 'no-answer' },
+  qualified:     { tag: 'qualified-lead', stage: /sent to owner/i, status: 'open' },
+  not_qualified: { tag: 'not-qualified', stage: /^lost$/i, status: 'lost' },
+  visit_booked:  { tag: 'site-visit-booked', stage: /site visit/i, status: 'open' },
+  quote_sent:    { tag: 'quote-sent', stage: /quote/i, status: 'open' },
+  won:           { tag: 'won', stage: /^won$/i, status: 'won' },
+  lost:          { tag: 'lost', stage: /^lost$/i, status: 'lost' },
+  note:          {},
+};
+let applied = 0;
+for (const c of contacts.slice(0, DETAIL_LIMIT)) {
+  let notes = [];
+  try { notes = (await api(`/contacts/${c.id}/notes`)).notes || []; } catch (e) { console.warn('notes', e.message); }
+  notesByContact[c.id] = notes;
+  const pending = notes.filter(n => /^\s*\[Dashboard\]/.test(stripHtml(n.body))).sort((a, b) => ts(a.dateAdded) - ts(b.dateAdded));
+  for (const n of pending) {
+    const body = stripHtml(n.body);
+    const key = (body.match(/#s=([a-z_]+)/) || [])[1] || 'note';
+    const remind = (body.match(/;r=([0-9T:.\-Z+]+)/) || [])[1];
+    const act = ACTIONS[key] || ACTIONS.note;
+    const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || c.contactName || 'lead';
+    try {
+      if (act.tag) await api(`/contacts/${c.id}/tags`, { method: 'POST', body: { tags: [act.tag] } });
+      if (act.stage && mainPipe) {
+        const stage = mainPipe.stages.find(s => act.stage.test(s.name));
+        if (stage) {
+          const o = oppByContact[c.id];
+          if (o) {
+            await api(`/opportunities/${o.id}`, { method: 'PUT', body: { pipelineId: mainPipe.id, pipelineStageId: stage.id, status: act.status } });
+            Object.assign(o, { pipelineId: mainPipe.id, pipelineStageId: stage.id, status: act.status, updatedAt: new Date().toISOString(), lastStatusChangeAt: new Date().toISOString() });
+          } else {
+            const r = await api('/opportunities/', { method: 'POST', body: { locationId: L, pipelineId: mainPipe.id, pipelineStageId: stage.id, status: act.status, contactId: c.id, name: `${name} - ${mainPipe.name}` } });
+            const no = r.opportunity || r; no.contactId = c.id; no.updatedAt = no.createdAt = new Date().toISOString(); oppByContact[c.id] = no; opps.push(no);
+          }
+        }
+      }
+      if (remind && !isNaN(Date.parse(remind))) {
+        const title = `Call back ${name}`;
+        const existing = ((await api(`/contacts/${c.id}/tasks`)).tasks || []).some(t => t.title === title && Math.abs(ts(t.dueDate) - Date.parse(remind)) < 6e4);
+        if (!existing) await api(`/contacts/${c.id}/tasks`, { method: 'POST', body: { title, body: short(body.replace(/\s*\|?\s*#s=.*$/, '').replace(/^\[Dashboard\]\s*/, ''), 300), dueDate: new Date(remind).toISOString(), completed: false } });
+      }
+      const clean = '✓ ' + body.replace(/^\[Dashboard\]\s*/, '').replace(/\s*\|?\s*#s=.*$/, '') + ' (from the leads dashboard)';
+      await api(`/contacts/${c.id}/notes/${n.id}`, { method: 'PUT', body: { body: clean } });
+      n.body = clean; applied++;
+    } catch (e) { console.warn('apply update failed:', e.message); }
+  }
+}
+if (applied) console.log(`Applied ${applied} dashboard update(s) to the CRM`);
+
 // 4. Conversations (latest per contact)
 const convByContact = {};
 for (let page = 0, startAfter = ''; page < 5; page++) {
@@ -84,7 +140,6 @@ function bucketOf(o) {
 }
 
 // 5. Build each lead
-const DETAIL_LIMIT = 60;
 const leads = [];
 for (const [i, c] of contacts.entries()) {
   const o = oppByContact[c.id], conv = convByContact[c.id], si = o ? stageInfo[o.pipelineStageId] || {} : {};
@@ -111,11 +166,9 @@ for (const [i, c] of contacts.entries()) {
   });
   if (i < DETAIL_LIMIT) {
     const strip = h => String(h || '').replace(/<br\s*\/?>(?!$)/gi, ' ').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
-    try {
-      const n = await api(`/contacts/${c.id}/notes`);
-      lead.notes = (n.notes || []).sort((a, b) => ts(b.dateAdded) - ts(a.dateAdded)).slice(0, 4).map(x => ({ text: short(strip(x.body), 300), at: x.dateAdded }));
-      lead.noteCount = (n.notes || []).length;
-    } catch (e) { lead.notes = []; }
+    const nList = notesByContact[c.id] || [];
+    lead.notes = nList.slice().sort((a, b) => ts(b.dateAdded) - ts(a.dateAdded)).slice(0, 4).map(x => ({ text: short(strip(x.body).replace(/\s*\|?\s*#s=.*$/, ''), 300), at: x.dateAdded }));
+    lead.noteCount = nList.length;
     try {
       const t = await api(`/contacts/${c.id}/tasks`);
       lead.tasks = (t.tasks || []).filter(x => !x.completed).sort((a, b) => ts(a.dueDate) - ts(b.dueDate)).slice(0, 5).map(x => ({ title: short(x.title, 120), body: short(strip(x.body), 160), due: x.dueDate }));
@@ -184,7 +237,7 @@ leads.forEach(l => { const k = l.source || 'Not recorded'; srcCount[k] = (srcCou
 const sources = Object.entries(srcCount).map(([name, n]) => ({ name, count: n })).sort((a, b) => b.count - a.count).slice(0, 6);
 
 const data = {
-  generatedAt: new Date().toISOString(), pipeline: mainPipe ? mainPipe.name : '', ghlBase: `https://app.gohighlevel.com/v2/location/${L}`,
+  generatedAt: new Date().toISOString(), hook: process.env.DASH_HOOK_URL || '', pipeline: mainPipe ? mainPipe.name : '', ghlBase: `https://app.gohighlevel.com/v2/location/${L}`,
   kpis, reminders, visits, stages: stageCounts, weekly, sources, leads: leads.slice(0, 80),
 };
 

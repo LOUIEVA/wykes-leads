@@ -124,6 +124,21 @@
   .note small, .task small { color: var(--muted); }
   .task { font-size: 14px; display: flex; justify-content: space-between; gap: 10px; }
   .muted { color: var(--muted); font-size: 14px; margin: 0; }
+  .upd { border-top: 1px solid var(--stone-2); padding-top: 8px; }
+  .upd summary { cursor: pointer; font-weight: 600; color: var(--green); min-height: 40px; display: flex; align-items: center; gap: 6px; list-style: none; }
+  .upd summary::-webkit-details-marker { display: none; }
+  .upd summary::before { content: "+"; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--green-soft); }
+  .upd[open] summary::before { content: "−"; }
+  .upd form { display: grid; gap: 10px; padding: 4px 0 2px; }
+  .upd label { display: grid; gap: 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
+  .upd select, .upd textarea, .upd input { font: inherit; font-size: 16px; font-weight: 400; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #fff; width: 100%; }
+  .upd textarea { min-height: 84px; resize: vertical; }
+  .upd select:focus, .upd textarea:focus, .upd input:focus { outline: 2px solid var(--green-2); outline-offset: 1px; }
+  .upd .row2 { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .upd .row2 .btn { flex: 1 1 auto; }
+  .upd .msgline { font-size: 14px; min-height: 20px; }
+  .msgline.ok { color: var(--green); } .msgline.bad { color: var(--red); }
+  .pend { background: var(--green-soft); color: #285232; border-radius: 10px; padding: 8px 11px; font-size: 14px; }
   footer { margin: 34px 0 40px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
   .linkbtn { background: none; border: 0; color: var(--green); font-weight: 600; cursor: pointer; padding: 8px 0; text-decoration: underline; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
@@ -148,7 +163,7 @@
     <div class="wrap">
       <div class="top">
         <img src="https://files.leadconnectorhq.com/file/6afc14b277a01e4622490903/wykes-logo-white.webp" alt="Wykes Contracts">
-        <div class="updated">Updated <b id="ago">just now</b><br>Refreshes every 15 min</div>
+        <div class="updated">Updated <b id="ago">just now</b><br>Refreshes every 5 min</div>
       </div>
       <div class="hello">
         <h1 id="greeting">Your leads</h1>
@@ -237,6 +252,37 @@
     var where = l.pipeline && l.pipeline !== (state.data && state.data.pipeline) ? '<span class="tag grey">' + esc(l.pipeline) + '</span>' : '';
     return '<span class="tag' + cls + '">' + esc(text) + '</span>' + where;
   }
+  var STATUS = [
+    ['note', 'No change, just add a note'], ['called', 'Called'], ['no_answer', 'No answer'], ['qualified', 'Qualified'],
+    ['not_qualified', 'Not qualified'], ['visit_booked', 'Site visit booked'], ['quote_sent', 'Quote sent'],
+    ['won', 'Won (job closed)'], ['lost', 'Lost (closed)']
+  ];
+  var PKEY = 'wykesLeadsPending';
+  var pending = (function () { try { return JSON.parse(localStorage.getItem(PKEY) || '{}'); } catch (e) { return {}; } })();
+  function savePending() { try { localStorage.setItem(PKEY, JSON.stringify(pending)); } catch (e) {} }
+  function updateForm(l) {
+    return '<details class="upd" data-cid="' + esc(l.contactId) + '"><summary>Update this lead</summary>' +
+      '<form data-cid="' + esc(l.contactId) + '" data-name="' + esc(l.name) + '">' +
+      '<label>Status<select name="status"><option value="">Choose a status...</option>' + STATUS.map(function (o) { return '<option value="' + o[0] + '">' + esc(o[1]) + '</option>'; }).join('') + '</select></label>' +
+      '<label>Note<textarea name="note" placeholder="What happened? e.g. Spoke to her, wants charcoal composite, 25 m."></textarea></label>' +
+      '<label>Remind me to call back (optional)<input type="datetime-local" name="remind"></label>' +
+      '<div class="row2"><button class="btn" type="submit">Save to CRM</button></div>' +
+      '<div class="msgline" role="status"></div></form></details>';
+  }
+  function pendingLine(l) {
+    var p = pending[l.contactId]; if (!p) return '';
+    return '<div class="pend">Saved to the CRM: <b>' + esc(p.label) + '</b>' + (p.note ? ' with a note' : '') + '. The stage updates within a few minutes.</div>';
+  }
+  function clearDonePending(d) {
+    var changed = false;
+    Object.keys(pending).forEach(function (cid) {
+      var p = pending[cid], l = d.leads.find(function (x) { return x.contactId === cid; });
+      var done = l && (l.notes || []).some(function (n) { return /^✓/.test(n.text) && new Date(n.at).getTime() >= p.at - 180000; });
+      if (done || Date.now() - p.at > 45 * 60000) { delete pending[cid]; changed = true; }
+    });
+    if (changed) savePending();
+  }
+  function busy() { return [].some.call(document.querySelectorAll('.upd[open] textarea, .upd[open] select'), function (el) { return el.value; }); }
   var isB = function (x) { return function (l) { return l.bucket === x; }; };
   var FILTERS = [
     ['all', 'All', function () { return true; }],
@@ -276,7 +322,7 @@
     var list = d.leads.filter(fn(state.filter));
     $('leadCount').textContent = list.length + (list.length === 1 ? ' lead' : ' leads');
     if (!d.leads.length) {
-      $('leads').innerHTML = '<div class="empty"><b>No leads yet</b>New enquiries from the website and WhatsApp show up here within 15 minutes.</div>';
+      $('leads').innerHTML = '<div class="empty"><b>No leads yet</b>New enquiries from the website and WhatsApp show up here within 5 minutes.</div>';
       return;
     }
     if (!list.length) { $('leads').innerHTML = '<div class="empty"><b>Nothing here right now</b>Pick another filter to see the rest.</div>'; return; }
@@ -302,7 +348,7 @@
       return '<article class="lead' + (l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost' ? ' flag' : '') + '">' +
         '<div class="lead-top"><h3>' + esc(l.name) + '</h3><span class="when">' + esc(ago(l.createdAt)) + '</span></div>' +
         details +
-        '<div class="tags">' + stageTag(l) + flags.join('') + '</div>' + msg + extra +
+        '<div class="tags">' + stageTag(l) + flags.join('') + '</div>' + pendingLine(l) + msg + extra + updateForm(l) +
         '<div class="actions">' +
           (tel ? '<a class="btn" href="tel:' + esc(tel) + '">Call</a><a class="btn ghost" href="https://wa.me/' + esc(wa) + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
           (l.email && !tel ? '<a class="btn" href="mailto:' + esc(l.email) + '">Email</a>' : '') +
@@ -356,20 +402,45 @@
     $('openBtn').disabled = true; $('err').textContent = silent ? '' : 'Opening...';
     try {
       state.data = await load(code); state.code = code; store.set(code);
-      $('lock').hidden = true; $('app').hidden = false; $('err').textContent = ''; render();
+      $('lock').hidden = true; $('app').hidden = false; $('err').textContent = ''; clearDonePending(state.data); render();
     } catch (e) {
       $('err').textContent = e.message === 'fetch' ? 'Could not reach the dashboard. Check your signal and try again.' : 'That passcode did not work. Check it and try again.';
       if (silent) store.clear();
     } finally { $('openBtn').disabled = false; }
   }
 
+  document.addEventListener('submit', async function (e) {
+    var f = e.target; if (!f.closest || !f.closest('.upd')) return;
+    e.preventDefault();
+    var line = f.querySelector('.msgline'), btn = f.querySelector('button');
+    var key = f.status.value, text = f.note.value.trim().replace(/#s=/g, '').replace(/\|/g, '/'), when = f.remind.value;
+    if (!key && !text) { line.className = 'msgline bad'; line.textContent = 'Pick a status or write a note first.'; return; }
+    if (!state.data.hook) { line.className = 'msgline bad'; line.textContent = 'Saving is not switched on yet. Ask Louie.'; return; }
+    key = key || 'note';
+    var label = (STATUS.find(function (o) { return o[0] === key; }) || STATUS[0])[1];
+    if (key === 'note') label = 'Note';
+    var remindIso = when ? new Date(when).toISOString() : '';
+    var remindHuman = when ? new Date(when).toLocaleString('en-IE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+    var body = '[Dashboard] ' + label + (remindHuman ? ' | Call back: ' + remindHuman : '') + (text ? ' | Note: ' + text : '') + ' | #s=' + key + ';r=' + remindIso;
+    btn.disabled = true; line.className = 'msgline'; line.textContent = 'Saving...';
+    try {
+      var res = await fetch(state.data.hook, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contact_id: f.getAttribute('data-cid'), status_key: key, outcome: label, note: body, remind_at: remindIso, source: 'Wykes leads dashboard', sent_at: new Date().toISOString() }) });
+      if (!res.ok) throw new Error(res.status);
+      pending[f.getAttribute('data-cid')] = { label: label, note: !!text, at: Date.now() }; savePending();
+      line.className = 'msgline ok'; line.textContent = 'Saved. The note is in the CRM now; the stage updates within a few minutes.';
+      f.reset(); setTimeout(function () { var dt = f.closest('details'); if (dt) dt.open = false; render(); }, 1800);
+    } catch (err) {
+      line.className = 'msgline bad'; line.textContent = 'Could not save. Check your signal and try again.';
+    } finally { btn.disabled = false; }
+  });
   $('lockForm').addEventListener('submit', function (e) { e.preventDefault(); open($('code').value); });
   document.addEventListener('click', function (e) { var b = e.target.closest('[data-f]'); if (b) setFilter(b.getAttribute('data-f')); });
   $('lockBtn').addEventListener('click', function () { store.clear(); state.data = null; $('code').value = ''; $('app').hidden = true; $('lock').hidden = false; });
   setInterval(function () {
     if (!state.code || document.hidden) return;
-    load(state.code).then(function (d) { state.data = d; render(); }).catch(function () {});
-  }, 5 * 60 * 1000);
+    load(state.code).then(function (d) { state.data = d; clearDonePending(d); if (!busy()) render(); }).catch(function () {});
+  }, 2 * 60 * 1000);
   setInterval(function () { if (state.data) $('ago').textContent = ago(state.data.generatedAt); }, 30000);
 
   // Passcode can arrive in the link (#k=CODE). The part after # never leaves the phone.

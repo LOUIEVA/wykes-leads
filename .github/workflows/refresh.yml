@@ -2,7 +2,7 @@ name: Refresh Wykes leads
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
@@ -34,6 +34,7 @@ jobs:
           GHL_PIT: ${{ secrets.GHL_PIT }}
           GHL_LOCATION_ID: ${{ secrets.GHL_LOCATION_ID }}
           DASH_PASSCODE: ${{ secrets.DASH_PASSCODE }}
+          DASH_HOOK_URL: ${{ secrets.DASH_HOOK_URL }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
@@ -44,7 +45,7 @@ jobs:
       - name: Keep the schedule alive
         if: github.event_name == 'schedule'
         run: |
-          if [ "$(date -u +%H)" = "03" ] && [ "$(date -u +%M)" -lt 15 ]; then
+          if [ "$(date -u +%H)" = "03" ] && [ "$(date -u +%M)" -lt 5 ]; then
             gh api -X PUT "repos/${{ github.repository }}/actions/workflows/refresh.yml/enable" && echo "re-enabled"
           fi
         env:
