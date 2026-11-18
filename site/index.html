@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en-IE">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#1e2a20">
+<title>Wykes Leads</title>
+<link rel="icon" href="https://files.leadconnectorhq.com/file/6afc14b5fdf6b54fd78c863f/wykes-monogram-green.webp">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@600;700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --green:#3b7a4a; --green-2:#489359; --green-soft:#e8f2ea; --forest:#1e2a20; --forest-2:#26352a; --stone:#f4f2ec; --stone-2:#e9e5da; --line:#d9d3c4; --ink:#1e2a20; --muted:#5f6b60; --amber:#b45309; --amber-soft:#fdf1e2; --red:#b42318; --white:#fff; --r:14px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--stone); color: var(--ink); font: 16px/1.45 "Work Sans", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  h1, h2, h3 { font-family: Bitter, Georgia, serif; margin: 0; letter-spacing: -.01em; }
+  button, input { font: inherit; }
+  a { color: inherit; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+  [hidden] { display: none !important; }
+
+  /* Lock screen */
+  .lock { min-height: 100vh; display: grid; place-items: center; background: var(--forest); padding: 24px; }
+  .lock-card { width: 100%; max-width: 380px; text-align: center; color: #dfe7dd; }
+  .lock-card img { width: 210px; margin-bottom: 28px; }
+  .lock-card h1 { color: #fff; font-size: 26px; margin-bottom: 8px; }
+  .lock-card p { margin: 0 0 22px; color: #b9c6b7; }
+  .lock-card input { width: 100%; padding: 15px 16px; border-radius: 12px; border: 1px solid #3c5040; background: var(--forest-2); color: #fff; font-size: 20px; letter-spacing: .12em; text-align: center; text-transform: uppercase; }
+  .lock-card input:focus { outline: 3px solid var(--green-2); outline-offset: 2px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 18px; border-radius: 12px; border: 0; background: var(--green); color: #fff; font-weight: 600; cursor: pointer; text-decoration: none; }
+  .btn:hover { background: #31653d; }
+  .btn:focus-visible { outline: 3px solid var(--green-2); outline-offset: 2px; }
+  .lock-card .btn { width: 100%; margin-top: 12px; font-size: 17px; }
+  .err { color: #f3b4ac; min-height: 24px; margin-top: 12px; font-size: 15px; }
+
+  /* Header */
+  header { background: var(--forest); color: #dfe7dd; padding: 14px 0 18px; }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .top img { height: 34px; max-width: 55%; object-fit: contain; color: #fff; font-family: Bitter, serif; }
+  .updated { font-size: 13px; color: #b9c6b7; text-align: right; }
+  .updated b { color: #fff; font-weight: 600; }
+  .hello { margin-top: 18px; }
+  .hello h1 { color: #fff; font-size: clamp(24px, 5vw, 32px); }
+  .hello p { margin: 4px 0 0; color: #b9c6b7; }
+
+  /* KPI tiles */
+  .kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: -2px; padding-top: 16px; }
+  @media (min-width: 760px) { .kpis { grid-template-columns: repeat(4, 1fr); gap: 14px; } }
+  .kpi { background: var(--white); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 14px 12px; text-align: left; cursor: pointer; transition: border-color .15s, transform .15s; color: inherit; }
+  .kpi:hover { border-color: var(--green-2); }
+  .kpi:focus-visible { outline: 3px solid var(--green-2); outline-offset: 2px; }
+  .kpi .label { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .kpi .num { font-family: Bitter, serif; font-size: 34px; font-weight: 700; line-height: 1.1; margin-top: 6px; }
+  .kpi .sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .kpi.alert { background: var(--amber-soft); border-color: #f2c38f; }
+  .kpi.alert .num { color: var(--amber); }
+  .kpi.good .num { color: var(--green); }
+  .kpi.active { border-color: var(--green); box-shadow: 0 0 0 2px var(--green) inset; }
+
+  section { margin-top: 26px; }
+  .sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .sec-head h2 { font-size: 21px; }
+  .sec-head span { color: var(--muted); font-size: 14px; }
+
+  /* Filters */
+  .chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 12px; scrollbar-width: none; }
+  .chip { flex: none; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--white); color: var(--ink); font-weight: 500; font-size: 14px; cursor: pointer; }
+  .chip[aria-pressed="true"] { background: var(--forest); color: #fff; border-color: var(--forest); }
+  .chip .n { opacity: .7; margin-left: 4px; }
+
+  /* Lead cards */
+  .leads { display: grid; gap: 10px; }
+  @media (min-width: 900px) { .leads { grid-template-columns: 1fr 1fr; } }
+  .lead { background: var(--white); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; display: grid; gap: 8px; }
+  .lead.flag { border-left: 4px solid var(--amber); }
+  .lead-top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+  .lead h3 { font-size: 18px; }
+  .when { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px; font-size: 14px; color: var(--muted); }
+  .meta span:not(:last-child)::after { content: "·"; margin-left: 6px; }
+  .tag { display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 999px; background: var(--green-soft); color: #285232; font-size: 13px; font-weight: 600; }
+  .tag.warn { background: var(--amber-soft); color: var(--amber); }
+  .tag.grey { background: var(--stone-2); color: var(--muted); }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .msg { background: var(--stone); border-radius: 10px; padding: 9px 11px; font-size: 14px; color: #34413a; }
+  .msg b { font-weight: 600; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .actions a { flex: 1 1 auto; min-height: 44px; font-size: 15px; }
+  .actions .ghost { background: var(--white); color: var(--forest); border: 1px solid var(--line); }
+  .actions .ghost:hover { background: var(--stone); }
+  .empty { background: var(--white); border: 1px dashed var(--line); border-radius: var(--r); padding: 28px 18px; text-align: center; color: var(--muted); }
+  .empty b { display: block; font-family: Bitter, serif; font-size: 19px; color: var(--ink); margin-bottom: 4px; }
+
+  /* Pipeline + weekly */
+  .two { display: grid; gap: 14px; }
+  @media (min-width: 900px) { .two { grid-template-columns: 1.2fr 1fr; } }
+  .panel { background: var(--white); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; }
+  .panel h2 { font-size: 19px; margin-bottom: 12px; }
+  .bar-row { display: grid; grid-template-columns: 150px 1fr 34px; align-items: center; gap: 10px; font-size: 14px; margin: 8px 0; }
+  .bar { height: 12px; background: var(--stone-2); border-radius: 99px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--green); border-radius: 99px; min-width: 2px; }
+  .bar-row .c { text-align: right; font-weight: 600; }
+  .weeks { display: flex; align-items: flex-end; gap: 8px; height: 150px; padding-top: 8px; }
+  .wk { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 6px; font-size: 12px; color: var(--muted); }
+  .wk i { display: block; width: 100%; max-width: 42px; background: var(--green-2); border-radius: 6px 6px 2px 2px; min-height: 3px; }
+  .wk b { color: var(--ink); font-size: 13px; }
+  .src { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--stone-2); font-size: 14px; }
+  .src:last-child { border: 0; }
+
+  footer { margin: 34px 0 40px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
+  .linkbtn { background: none; border: 0; color: var(--green); font-weight: 600; cursor: pointer; padding: 8px 0; text-decoration: underline; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+
+<div class="lock" id="lock">
+  <form class="lock-card" id="lockForm" autocomplete="off">
+    <img src="https://files.leadconnectorhq.com/file/6afc14b277a01e4622490903/wykes-logo-white.webp" alt="Wykes Contracts">
+    <h1>Your leads</h1>
+    <p>Enter the passcode Louie sent you. This phone will remember it.</p>
+    <label class="sr" for="code">Passcode</label>
+    <input id="code" inputmode="text" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XX" required>
+    <button class="btn" type="submit" id="openBtn">Open my leads</button>
+    <div class="err" id="err" role="alert"></div>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <div class="wrap">
+      <div class="top">
+        <img src="https://files.leadconnectorhq.com/file/6afc14b277a01e4622490903/wykes-logo-white.webp" alt="Wykes Contracts">
+        <div class="updated">Updated <b id="ago">just now</b><br>Refreshes every 15 min</div>
+      </div>
+      <div class="hello">
+        <h1 id="greeting">Your leads</h1>
+        <p id="summary"></p>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="kpis" id="kpis"></div>
+
+    <section aria-labelledby="leadsTitle">
+      <div class="sec-head"><h2 id="leadsTitle">Leads</h2><span id="leadCount"></span></div>
+      <div class="chips" id="chips" role="group" aria-label="Filter leads"></div>
+      <div class="leads" id="leads"></div>
+    </section>
+
+    <section class="two">
+      <div class="panel"><h2>Where each lead is</h2><div id="stages"></div></div>
+      <div class="panel"><h2>New leads per week</h2><div class="weeks" id="weeks"></div></div>
+    </section>
+
+    <section class="panel"><h2>Where leads come from</h2><div id="sources"></div></section>
+
+    <footer>
+      <span>Wykes Contracts · leads from your website, WhatsApp and messages</span>
+      <button class="linkbtn" id="lockBtn" type="button">Lock this phone</button>
+    </footer>
+  </main>
+</div>
+
+<script>
+(function () {
+  var DATA_URL = 'data.enc.json', KEY = 'wykesLeadsCode', state = { data: null, filter: 'all', code: '' };
+  var $ = function (id) { return document.getElementById(id); };
+  var store = {
+    get: function () { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } },
+    set: function (v) { try { localStorage.setItem(KEY, v); } catch (e) {} },
+    clear: function () { try { localStorage.removeItem(KEY); } catch (e) {} }
+  };
+  var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var euro = function (n) { return '€' + Math.round(n || 0).toLocaleString('en-IE'); };
+  function ago(iso) {
+    if (!iso) return '';
+    var s = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + ' min ago';
+    if (s < 86400) return Math.floor(s / 3600) + ' h ago';
+    if (s < 172800) return 'yesterday';
+    if (s < 604800) return Math.floor(s / 86400) + ' days ago';
+    return new Date(iso).toLocaleDateString('en-IE', { day: 'numeric', month: 'short' });
+  }
+  var b64 = function (s) { return Uint8Array.from(atob(s), function (c) { return c.charCodeAt(0); }); };
+
+  async function decrypt(file, code) {
+    var enc = new TextEncoder();
+    var base = await crypto.subtle.importKey('raw', enc.encode(code.trim().toUpperCase()), 'PBKDF2', false, ['deriveKey']);
+    var key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: b64(file.salt), iterations: file.iter, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+    var plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(file.iv) }, key, b64(file.ct));
+    return JSON.parse(new TextDecoder().decode(plain));
+  }
+  async function load(code) {
+    var res = await fetch(DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('fetch');
+    return decrypt(await res.json(), code);
+  }
+
+  function stageTag(l) {
+    if (l.status === 'won') return '<span class="tag">Won</span>';
+    if (l.status === 'lost') return '<span class="tag grey">Lost</span>';
+    var warn = /sent to owner/i.test(l.stage);
+    return '<span class="tag' + (warn ? ' warn' : /nurture|lost/i.test(l.stage) ? ' grey' : '') + '">' + esc(l.stage.replace(' (interested)', '')) + '</span>';
+  }
+  var FILTERS = [
+    ['all', 'All', function () { return true; }],
+    ['new', 'New', function (l) { return /new enquiry|ai qualifying/i.test(l.stage) && l.status === 'open'; }],
+    ['reply', 'Need a reply', function (l) { return l.needsReply && l.status === 'open'; }],
+    ['replied', 'Replied', function (l) { return l.replied; }],
+    ['owner', 'Waiting on you', function (l) { return /sent to owner/i.test(l.stage) && l.status === 'open'; }],
+    ['booked', 'Visit booked', function (l) { return /site visit/i.test(l.stage) && l.status === 'open'; }],
+    ['quote', 'Quote sent', function (l) { return /quote/i.test(l.stage) && l.status === 'open'; }],
+    ['won', 'Won', function (l) { return l.status === 'won' || /^won$/i.test(l.stage); }]
+  ];
+  var fn = function (id) { return (FILTERS.find(function (f) { return f[0] === id; }) || FILTERS[0])[2]; };
+
+  function renderKpis(k) {
+    var tiles = [
+      ['new', 'New leads', k.new7, (k.newToday ? k.newToday + ' today · ' : '') + k.new30 + ' in 30 days', ''],
+      ['reply', 'Need a reply', k.needsReply, 'Their message is the last one', k.needsReply ? 'alert' : ''],
+      ['replied', 'Replied', k.replied30, 'Leads who wrote back, 30 days', ''],
+      ['owner', 'Waiting on you', k.sentToOwner, 'Pick a day for the site visit', k.sentToOwner ? 'alert' : ''],
+      ['booked', 'Site visits booked', k.visitsBooked, 'Booked, not yet quoted', ''],
+      ['quote', 'Quotes out', k.quotesOut, euro(k.quotesValue) + ' waiting', ''],
+      ['won', 'Won', k.won30, euro(k.wonValue30) + ' in 30 days', 'good'],
+      ['all', 'All leads', k.totalLeads, k.nurture + ' not ready yet · ' + k.lost + ' lost', '']
+    ];
+    $('kpis').innerHTML = tiles.map(function (t) {
+      return '<button type="button" class="kpi ' + t[4] + (state.filter === t[0] ? ' active' : '') + '" data-f="' + t[0] + '"><div class="label">' + t[1] + '</div><div class="num">' + t[2] + '</div><div class="sub">' + esc(t[3]) + '</div></button>';
+    }).join('');
+  }
+  function renderChips(leads) {
+    $('chips').innerHTML = FILTERS.map(function (f) {
+      var n = leads.filter(f[2]).length;
+      return '<button type="button" class="chip" data-f="' + f[0] + '" aria-pressed="' + (state.filter === f[0]) + '">' + f[1] + '<span class="n">' + n + '</span></button>';
+    }).join('');
+  }
+  function renderLeads(d) {
+    var list = d.leads.filter(fn(state.filter));
+    $('leadCount').textContent = list.length + (list.length === 1 ? ' lead' : ' leads');
+    if (!d.leads.length) {
+      $('leads').innerHTML = '<div class="empty"><b>No leads yet</b>New enquiries from the website and WhatsApp show up here within 15 minutes.</div>';
+      return;
+    }
+    if (!list.length) { $('leads').innerHTML = '<div class="empty"><b>Nothing here right now</b>Pick another filter to see the rest.</div>'; return; }
+    $('leads').innerHTML = list.map(function (l) {
+      var tel = (l.phone || '').replace(/[^\d+]/g, ''), wa = tel.replace(/^\+/, '').replace(/^0/, '353');
+      var meta = [l.service, l.town, l.timeframe, l.size].filter(Boolean).map(function (x) { return '<span>' + esc(x) + '</span>'; }).join('');
+      var flags = [];
+      if (l.needsReply && l.status === 'open') flags.push('<span class="tag warn">Needs a reply</span>');
+      else if (l.replied) flags.push('<span class="tag grey">Replied</span>');
+      if (l.ballpark) flags.push('<span class="tag grey">' + esc(l.ballpark) + '</span>');
+      var msg = l.lastMessage && l.lastMessage.text ? '<div class="msg"><b>' + (l.lastMessage.dir === 'inbound' ? esc(l.name.split(' ')[0]) : 'You') + ' (' + esc(ago(l.lastMessage.at)) + '):</b> ' + esc(l.lastMessage.text) + '</div>' : (l.message ? '<div class="msg"><b>Their job:</b> ' + esc(l.message) + '</div>' : '');
+      return '<article class="lead' + (l.needsReply && l.status === 'open' ? ' flag' : '') + '">' +
+        '<div class="lead-top"><h3>' + esc(l.name) + '</h3><span class="when">' + esc(ago(l.createdAt)) + '</span></div>' +
+        (meta ? '<div class="meta">' + meta + '</div>' : '') +
+        '<div class="tags">' + stageTag(l) + flags.join('') + '</div>' + msg +
+        '<div class="actions">' +
+          (tel ? '<a class="btn" href="tel:' + esc(tel) + '">Call</a><a class="btn ghost" href="https://wa.me/' + esc(wa) + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
+          '<a class="btn ghost" href="' + esc(d.ghlBase + '/contacts/detail/' + l.contactId) + '" target="_blank" rel="noopener">Open in CRM</a>' +
+        '</div></article>';
+    }).join('');
+  }
+  function renderPanels(d) {
+    var max = Math.max.apply(null, d.stages.map(function (s) { return s.count; }).concat([1]));
+    $('stages').innerHTML = d.stages.map(function (s) {
+      return '<div class="bar-row"><span>' + esc(s.name.replace(' (interested)', '')) + '</span><span class="bar"><i style="width:' + (s.count / max * 100) + '%"></i></span><span class="c">' + s.count + '</span></div>';
+    }).join('');
+    var wmax = Math.max.apply(null, d.weekly.map(function (w) { return w.count; }).concat([1]));
+    $('weeks').innerHTML = d.weekly.map(function (w) {
+      var label = new Date(w.start).toLocaleDateString('en-IE', { day: 'numeric', month: 'short' });
+      return '<div class="wk" title="Week from ' + label + '"><b>' + w.count + '</b><i style="height:' + Math.max(3, w.count / wmax * 110) + 'px"></i>' + label + '</div>';
+    }).join('');
+    $('sources').innerHTML = d.sources.length ? d.sources.map(function (s) { return '<div class="src"><span>' + esc(s.name) + '</span><b>' + s.count + '</b></div>'; }).join('') : '<p style="margin:0;color:var(--muted)">Shows once leads come in.</p>';
+  }
+  function render() {
+    var d = state.data, k = d.kpis;
+    var h = Number(new Date().toLocaleString('en-IE', { hour: 'numeric', hour12: false, timeZone: 'Europe/Dublin' }));
+    $('greeting').textContent = (h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening') + '. Here are your leads.';
+    var bits = [];
+    bits.push(k.new7 + (k.new7 === 1 ? ' new lead' : ' new leads') + ' this week');
+    if (k.needsReply) bits.push(k.needsReply + ' waiting for a reply');
+    if (k.sentToOwner) bits.push(k.sentToOwner + ' need a site visit day from you');
+    $('summary').textContent = bits.join(', ') + '.';
+    $('ago').textContent = ago(d.generatedAt);
+    renderKpis(k); renderChips(d.leads); renderLeads(d); renderPanels(d);
+  }
+  function setFilter(f) { state.filter = f; render(); }
+
+  async function open(code, silent) {
+    $('openBtn').disabled = true; $('err').textContent = silent ? '' : 'Opening...';
+    try {
+      state.data = await load(code); state.code = code; store.set(code);
+      $('lock').hidden = true; $('app').hidden = false; $('err').textContent = ''; render();
+    } catch (e) {
+      $('err').textContent = e.message === 'fetch' ? 'Could not reach the dashboard. Check your signal and try again.' : 'That passcode did not work. Check it and try again.';
+      if (silent) store.clear();
+    } finally { $('openBtn').disabled = false; }
+  }
+
+  $('lockForm').addEventListener('submit', function (e) { e.preventDefault(); open($('code').value); });
+  document.addEventListener('click', function (e) { var b = e.target.closest('[data-f]'); if (b) setFilter(b.getAttribute('data-f')); });
+  $('lockBtn').addEventListener('click', function () { store.clear(); state.data = null; $('code').value = ''; $('app').hidden = true; $('lock').hidden = false; });
+  setInterval(function () {
+    if (!state.code || document.hidden) return;
+    load(state.code).then(function (d) { state.data = d; render(); }).catch(function () {});
+  }, 5 * 60 * 1000);
+  setInterval(function () { if (state.data) $('ago').textContent = ago(state.data.generatedAt); }, 30000);
+
+  // Passcode can arrive in the link (#k=CODE). The part after # never leaves the phone.
+  var m = location.hash.match(/k=([A-Za-z0-9-]+)/);
+  if (m) { store.set(m[1].toUpperCase()); history.replaceState(null, '', location.pathname); }
+  var saved = store.get();
+  if (saved) { $('code').value = saved; open(saved, true); }
+})();
+</script>
+</body>
+</html>
