@@ -157,7 +157,7 @@
     <section class="panel"><h2>Where leads come from</h2><div id="sources"></div></section>
 
     <footer>
-      <span>Wykes Contracts · leads from your website, WhatsApp and messages</span>
+      <span>Wykes Contracts · live from your CRM</span>
       <button class="linkbtn" id="lockBtn" type="button">Lock this phone</button>
     </footer>
   </main>
@@ -199,21 +199,23 @@
     return decrypt(await res.json(), code);
   }
 
+  var LABEL = { new: 'New', owner: 'Waiting on you', booked: 'Visit booked', quote: 'Quote sent', won: 'Won', lost: 'Lost', nurture: 'Not ready yet' };
   function stageTag(l) {
-    if (l.status === 'won') return '<span class="tag">Won</span>';
-    if (l.status === 'lost') return '<span class="tag grey">Lost</span>';
-    var warn = /sent to owner/i.test(l.stage);
-    return '<span class="tag' + (warn ? ' warn' : /nurture|lost/i.test(l.stage) ? ' grey' : '') + '">' + esc(l.stage.replace(' (interested)', '')) + '</span>';
+    var cls = l.bucket === 'owner' ? ' warn' : (l.bucket === 'lost' || l.bucket === 'nurture') ? ' grey' : '';
+    var text = l.stage ? l.stage.replace(' (interested)', '') : 'New contact';
+    var where = l.pipeline && l.pipeline !== (state.data && state.data.pipeline) ? '<span class="tag grey">' + esc(l.pipeline) + '</span>' : '';
+    return '<span class="tag' + cls + '">' + esc(text) + '</span>' + where;
   }
+  var isB = function (x) { return function (l) { return l.bucket === x; }; };
   var FILTERS = [
     ['all', 'All', function () { return true; }],
-    ['new', 'New', function (l) { return /new enquiry|ai qualifying/i.test(l.stage) && l.status === 'open'; }],
-    ['reply', 'Need a reply', function (l) { return l.needsReply && l.status === 'open'; }],
+    ['new', 'New', isB('new')],
+    ['reply', 'Need a reply', function (l) { return l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost'; }],
     ['replied', 'Replied', function (l) { return l.replied; }],
-    ['owner', 'Waiting on you', function (l) { return /sent to owner/i.test(l.stage) && l.status === 'open'; }],
-    ['booked', 'Visit booked', function (l) { return /site visit/i.test(l.stage) && l.status === 'open'; }],
-    ['quote', 'Quote sent', function (l) { return /quote/i.test(l.stage) && l.status === 'open'; }],
-    ['won', 'Won', function (l) { return l.status === 'won' || /^won$/i.test(l.stage); }]
+    ['owner', 'Waiting on you', isB('owner')],
+    ['booked', 'Visit booked', isB('booked')],
+    ['quote', 'Quote sent', isB('quote')],
+    ['won', 'Won', isB('won')]
   ];
   var fn = function (id) { return (FILTERS.find(function (f) { return f[0] === id; }) || FILTERS[0])[2]; };
 
@@ -250,11 +252,11 @@
       var tel = (l.phone || '').replace(/[^\d+]/g, ''), wa = tel.replace(/^\+/, '').replace(/^0/, '353');
       var meta = [l.service, l.town, l.timeframe, l.size].filter(Boolean).map(function (x) { return '<span>' + esc(x) + '</span>'; }).join('');
       var flags = [];
-      if (l.needsReply && l.status === 'open') flags.push('<span class="tag warn">Needs a reply</span>');
+      if (l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost') flags.push('<span class="tag warn">Needs a reply</span>');
       else if (l.replied) flags.push('<span class="tag grey">Replied</span>');
       if (l.ballpark) flags.push('<span class="tag grey">' + esc(l.ballpark) + '</span>');
       var msg = l.lastMessage && l.lastMessage.text ? '<div class="msg"><b>' + (l.lastMessage.dir === 'inbound' ? esc(l.name.split(' ')[0]) : 'You') + ' (' + esc(ago(l.lastMessage.at)) + '):</b> ' + esc(l.lastMessage.text) + '</div>' : (l.message ? '<div class="msg"><b>Their job:</b> ' + esc(l.message) + '</div>' : '');
-      return '<article class="lead' + (l.needsReply && l.status === 'open' ? ' flag' : '') + '">' +
+      return '<article class="lead' + (l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost' ? ' flag' : '') + '">' +
         '<div class="lead-top"><h3>' + esc(l.name) + '</h3><span class="when">' + esc(ago(l.createdAt)) + '</span></div>' +
         (meta ? '<div class="meta">' + meta + '</div>' : '') +
         '<div class="tags">' + stageTag(l) + flags.join('') + '</div>' + msg +
@@ -266,8 +268,11 @@
   }
   function renderPanels(d) {
     var max = Math.max.apply(null, d.stages.map(function (s) { return s.count; }).concat([1]));
+    var lastPipe = null;
     $('stages').innerHTML = d.stages.map(function (s) {
-      return '<div class="bar-row"><span>' + esc(s.name.replace(' (interested)', '')) + '</span><span class="bar"><i style="width:' + (s.count / max * 100) + '%"></i></span><span class="c">' + s.count + '</span></div>';
+      var head = s.pipeline !== lastPipe ? '<div style="font-weight:600;margin:' + (lastPipe === null ? '0' : '14px') + ' 0 4px;color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.04em">' + esc(s.pipeline) + '</div>' : '';
+      lastPipe = s.pipeline;
+      return head + '<div class="bar-row"><span>' + esc(s.name.replace(' (interested)', '')) + '</span><span class="bar"><i style="width:' + (s.count / max * 100) + '%"></i></span><span class="c">' + s.count + '</span></div>';
     }).join('');
     var wmax = Math.max.apply(null, d.weekly.map(function (w) { return w.count; }).concat([1]));
     $('weeks').innerHTML = d.weekly.map(function (w) {

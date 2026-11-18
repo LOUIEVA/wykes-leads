@@ -29,27 +29,37 @@ const DAY = 864e5, now = Date.now();
 const ts = v => (v ? new Date(v).getTime() : 0);
 const short = (s, n) => (s || '').replace(/\s+/g, ' ').trim().slice(0, n);
 
-// 1. Field names, pipeline and stages
+// 1. Field names and every pipeline
 const fieldsRes = await api(`/locations/${L}/customFields?model=contact`);
 const fieldKey = Object.fromEntries((fieldsRes.customFields || []).map(f => [f.id, (f.fieldKey || '').replace(/^contact\./, '')]));
 const { pipelines = [] } = await api(`/opportunities/pipelines?locationId=${L}`);
-const pipe = pipelines.find(p => p.name.trim().toLowerCase() === PIPELINE_NAME.toLowerCase());
-if (!pipe) throw new Error(`Pipeline "${PIPELINE_NAME}" not found`);
-const stages = pipe.stages.map(s => ({ id: s.id, name: s.name }));
-const stageName = id => (stages.find(s => s.id === id) || {}).name || 'Unknown';
-const stageIs = (o, re) => re.test(stageName(o.pipelineStageId));
+const stageInfo = {};
+pipelines.forEach(p => p.stages.forEach((s, i) => { stageInfo[s.id] = { pipeline: p.name, pipelineId: p.id, stage: s.name, order: i }; }));
+const mainPipe = pipelines.find(p => p.name.trim().toLowerCase() === PIPELINE_NAME.toLowerCase()) || pipelines[0];
 
-// 2. Opportunities in the pipeline
+// 2. Every contact in the sub-account (these are the leads)
+let contacts = [];
+for (let page = 1; page <= 20; page++) {
+  const r = await api('/contacts/search', { method: 'POST', body: { locationId: L, pageLimit: 100, page, sort: [{ field: 'dateAdded', direction: 'desc' }] } });
+  contacts.push(...(r.contacts || []));
+  if ((r.contacts || []).length < 100) break;
+}
+const internal = c => (c.tags || []).some(t => /^(owner|internal|test)$/i.test(t)) || /internal|not a lead/i.test(c.source || '');
+contacts = contacts.filter(c => !internal(c));
+contacts.sort((a, b) => ts(b.dateAdded) - ts(a.dateAdded));
+
+// 3. Every opportunity in every pipeline, latest one per contact
 let opps = [];
 for (let page = 1; page <= 20; page++) {
-  const r = await api(`/opportunities/search?location_id=${L}&pipeline_id=${pipe.id}&limit=100&page=${page}`);
+  const r = await api(`/opportunities/search?location_id=${L}&limit=100&page=${page}`);
   opps.push(...(r.opportunities || []));
   if ((r.opportunities || []).length < 100) break;
 }
-opps = opps.filter(o => !((o.contact && o.contact.tags) || []).includes('owner'));
-opps.sort((a, b) => ts(b.createdAt) - ts(a.createdAt));
+const oppByContact = {};
+opps.sort((a, b) => ts(b.updatedAt || b.createdAt) - ts(a.updatedAt || a.createdAt))
+  .forEach(o => { const cid = o.contactId || (o.contact && o.contact.id); if (cid && !oppByContact[cid]) oppByContact[cid] = o; });
 
-// 3. Conversations (latest per contact)
+// 4. Conversations (latest per contact)
 const convByContact = {};
 for (let page = 0, startAfter = ''; page < 5; page++) {
   const r = await api(`/conversations/search?locationId=${L}&limit=100&sort=desc&sortBy=last_message_date${startAfter}`, { version: '2021-04-15' });
@@ -60,85 +70,98 @@ for (let page = 0, startAfter = ''; page < 5; page++) {
 }
 const isRealMsg = t => t && !/ACTIVITY|NO_SHOW|CUSTOM_PROVIDER/i.test(String(t));
 
-// 4. Details for recent leads: custom fields, and whether they ever replied
+// Where a lead is, in plain words
+function bucketOf(o) {
+  if (!o) return 'new';
+  const st = (stageInfo[o.pipelineStageId] || {}).stage || '';
+  if (o.status === 'won' || /^won$|closed won/i.test(st)) return 'won';
+  if (o.status === 'lost' || o.status === 'abandoned' || /lost/i.test(st)) return 'lost';
+  if (/sent to owner/i.test(st)) return 'owner';
+  if (/site visit|appointment|booked/i.test(st)) return 'booked';
+  if (/quote|proposal|negotiat/i.test(st)) return 'quote';
+  if (/nurture/i.test(st)) return 'nurture';
+  return 'new';
+}
+
+// 5. Build each lead
 const DETAIL_LIMIT = 60;
 const leads = [];
-for (const [i, o] of opps.entries()) {
-  const cid = o.contactId || (o.contact && o.contact.id);
-  const conv = convByContact[cid];
+for (const [i, c] of contacts.entries()) {
+  const o = oppByContact[c.id], conv = convByContact[c.id], si = o ? stageInfo[o.pipelineStageId] || {} : {};
+  let f = Object.fromEntries((c.customFields || []).map(cf => [fieldKey[cf.id] || cf.id, cf.value ?? cf.fieldValue]));
+  const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || c.contactName || c.companyName || c.email || c.phone || 'Unnamed lead';
   const lead = {
-    id: o.id, contactId: cid, name: o.name || (o.contact && o.contact.name) || 'Unnamed lead',
-    phone: (o.contact && o.contact.phone) || '', email: (o.contact && o.contact.email) || '',
-    stage: stageName(o.pipelineStageId), status: o.status, value: Number(o.monetaryValue) || 0,
-    createdAt: o.createdAt, updatedAt: o.updatedAt || o.lastStageChangeAt || o.createdAt,
-    tags: ((o.contact && o.contact.tags) || []).filter(t => /lead|nurture|area|human|owner-answered|waiting/i.test(t)),
+    contactId: c.id, name, phone: c.phone || '', email: c.email || '',
+    createdAt: c.dateAdded, updatedAt: (o && o.updatedAt) || c.dateUpdated || c.dateAdded,
+    pipeline: si.pipeline || '', stage: si.stage || '', status: o ? o.status : '', value: o ? Number(o.monetaryValue) || 0 : 0,
+    bucket: bucketOf(o), oppAt: o ? o.lastStatusChangeAt || o.updatedAt : null,
+    tags: (c.tags || []).slice(0, 6),
     needsReply: !!(conv && conv.lastMessageDirection === 'inbound' && isRealMsg(conv.lastMessageType)),
     unread: conv ? Number(conv.unreadCount) || 0 : 0,
-    lastMessage: conv && conv.lastMessageDate ? { dir: conv.lastMessageDirection, at: conv.lastMessageDate, type: String(conv.lastMessageType || '').replace('TYPE_', '').toLowerCase(), text: short(conv.lastMessageBody, 110) } : null,
+    lastMessage: conv && conv.lastMessageDate && isRealMsg(conv.lastMessageType) ? { dir: conv.lastMessageDirection, at: conv.lastMessageDate, type: String(conv.lastMessageType || '').replace('TYPE_', '').toLowerCase(), text: short(conv.lastMessageBody, 110) } : null,
     replied: false,
   };
-  if (i < DETAIL_LIMIT && cid) {
+  if (i < DETAIL_LIMIT && !Object.keys(f).length) {
+    try { const { contact = {} } = await api(`/contacts/${c.id}`); f = Object.fromEntries((contact.customFields || []).map(cf => [fieldKey[cf.id] || cf.id, cf.value ?? cf.fieldValue])); } catch (e) { console.warn('contact', e.message); }
+  }
+  Object.assign(lead, {
+    town: short(f.town_or_eircode || c.city || '', 40), service: short(f.service_requested, 40), timeframe: short(f.timeframe, 30),
+    size: short(f.job_size, 40), message: short(f.job_message, 160), ballpark: short(f.ballpark_text, 60),
+    source: short(c.source || (c.attributionSource && (c.attributionSource.sessionSource || c.attributionSource.medium)) || f.utm_source || '', 30),
+  });
+  if (i < DETAIL_LIMIT && conv) {
     try {
-      const { contact = {} } = await api(`/contacts/${cid}`);
-      const f = Object.fromEntries((contact.customFields || []).map(cf => [fieldKey[cf.id] || cf.id, cf.value ?? cf.fieldValue]));
-      Object.assign(lead, {
-        town: short(f.town_or_eircode || contact.city || '', 40), service: short(f.service_requested, 40), timeframe: short(f.timeframe, 30),
-        size: short(f.job_size, 40), message: short(f.job_message, 160), ballpark: short(f.ballpark_text, 60), grade: short(f.lead_grade, 12),
-        source: short(contact.source || (contact.attributionSource && contact.attributionSource.sessionSource) || f.utm_source || '', 30),
-      });
-      if (!lead.phone) lead.phone = contact.phone || '';
-    } catch (e) { console.warn('contact', e.message); }
-    if (conv) {
-      try {
-        const m = await api(`/conversations/${conv.id}/messages?limit=100`, { version: '2021-04-15' });
-        const msgs = (m.messages && m.messages.messages) || m.messages || [];
-        const inbound = msgs.filter(x => x.direction === 'inbound' && isRealMsg(x.messageType));
-        lead.replied = inbound.length > 0;
-        if (inbound.length) lead.repliedAt = inbound.map(x => x.dateAdded).sort().pop();
-      } catch (e) { lead.replied = lead.needsReply; }
-    }
+      const m = await api(`/conversations/${conv.id}/messages?limit=100`, { version: '2021-04-15' });
+      const msgs = (m.messages && m.messages.messages) || m.messages || [];
+      const inbound = msgs.filter(x => x.direction === 'inbound' && isRealMsg(x.messageType));
+      lead.replied = inbound.length > 0;
+      if (inbound.length) lead.repliedAt = inbound.map(x => x.dateAdded).sort().pop();
+    } catch (e) { lead.replied = lead.needsReply; }
   }
   leads.push(lead);
 }
 
-// 5. Summary numbers
+// 6. Summary numbers
 const within = (v, days) => ts(v) >= now - days * DAY;
 const dublinNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Dublin' }));
 const dublinMidnight = new Date(dublinNow); dublinMidnight.setHours(0, 0, 0, 0);
 const startOfToday = now - (dublinNow - dublinMidnight); // time elapsed since midnight in Ireland
-const open = o => o.status === 'open';
-const count = re => opps.filter(o => open(o) && stageIs(o, re)).length;
-const won = opps.filter(o => o.status === 'won' || stageIs(o, /^won$/i));
-const quotes = opps.filter(o => open(o) && stageIs(o, /quote/i));
+const inB = b => leads.filter(l => l.bucket === b);
+const sum = list => list.reduce((s, l) => s + (l.value || 0), 0);
+const won30 = inB('won').filter(l => within(l.oppAt || l.updatedAt, 30));
 const kpis = {
-  newToday: opps.filter(o => ts(o.createdAt) >= startOfToday).length,
-  new7: opps.filter(o => within(o.createdAt, 7)).length,
-  new30: opps.filter(o => within(o.createdAt, 30)).length,
-  needsReply: leads.filter(l => l.needsReply && l.status === 'open').length,
+  newToday: leads.filter(l => ts(l.createdAt) >= startOfToday).length,
+  new7: leads.filter(l => within(l.createdAt, 7)).length,
+  new30: leads.filter(l => within(l.createdAt, 30)).length,
+  needsReply: leads.filter(l => l.needsReply && !['won', 'lost'].includes(l.bucket)).length,
   replied30: leads.filter(l => l.replied && within(l.repliedAt || l.updatedAt, 30)).length,
-  sentToOwner: count(/sent to owner/i),
-  visitsBooked: count(/site visit/i),
-  quotesOut: quotes.length, quotesValue: quotes.reduce((s, o) => s + (Number(o.monetaryValue) || 0), 0),
-  won30: won.filter(o => within(o.lastStatusChangeAt || o.updatedAt, 30)).length,
-  wonValue30: won.filter(o => within(o.lastStatusChangeAt || o.updatedAt, 30)).reduce((s, o) => s + (Number(o.monetaryValue) || 0), 0),
-  wonAll: won.length, nurture: count(/nurture/i), lost: opps.filter(o => o.status === 'lost' || stageIs(o, /^lost$/i)).length,
-  totalLeads: opps.length,
+  sentToOwner: inB('owner').length, visitsBooked: inB('booked').length,
+  quotesOut: inB('quote').length, quotesValue: sum(inB('quote')),
+  won30: won30.length, wonValue30: sum(won30), wonAll: inB('won').length,
+  nurture: inB('nurture').length, lost: inB('lost').length, totalLeads: leads.length,
 };
-const stageCounts = stages.map(s => ({ name: s.name, count: opps.filter(o => o.pipelineStageId === s.id && o.status !== 'abandoned').length, value: opps.filter(o => o.pipelineStageId === s.id).reduce((a, o) => a + (Number(o.monetaryValue) || 0), 0) }));
+const stageCounts = [];
+pipelines.forEach(p => {
+  const inPipe = leads.filter(l => l.pipeline === p.name);
+  if (p !== mainPipe && !inPipe.length) return;
+  p.stages.forEach(s => stageCounts.push({ pipeline: p.name, name: s.name, count: inPipe.filter(l => l.stage === s.name).length }));
+});
+const noDeal = leads.filter(l => !l.pipeline).length;
+if (noDeal) stageCounts.push({ pipeline: 'Not in a pipeline yet', name: 'Contacts only', count: noDeal });
 const weekly = Array.from({ length: 8 }, (_, i) => {
   const end = now - i * 7 * DAY, start = end - 7 * DAY;
-  return { start: new Date(start).toISOString(), count: opps.filter(o => ts(o.createdAt) > start && ts(o.createdAt) <= end).length };
+  return { start: new Date(start).toISOString(), count: leads.filter(l => ts(l.createdAt) > start && ts(l.createdAt) <= end).length };
 }).reverse();
 const srcCount = {};
-leads.forEach(l => { const k = l.source || 'Website form'; srcCount[k] = (srcCount[k] || 0) + 1; });
+leads.forEach(l => { const k = l.source || 'Not recorded'; srcCount[k] = (srcCount[k] || 0) + 1; });
 const sources = Object.entries(srcCount).map(([name, n]) => ({ name, count: n })).sort((a, b) => b.count - a.count).slice(0, 6);
 
 const data = {
-  generatedAt: new Date().toISOString(), pipeline: pipe.name, ghlBase: `https://app.gohighlevel.com/v2/location/${L}`,
-  kpis, stages: stageCounts, weekly, sources, leads: leads.slice(0, 60),
+  generatedAt: new Date().toISOString(), pipeline: mainPipe ? mainPipe.name : '', ghlBase: `https://app.gohighlevel.com/v2/location/${L}`,
+  kpis, stages: stageCounts, weekly, sources, leads: leads.slice(0, 80),
 };
 
-// 6. Encrypt with the passcode (PBKDF2-SHA256 -> AES-256-GCM) and write the site
+// 7. Encrypt with the passcode (PBKDF2-SHA256 -> AES-256-GCM) and write the site
 const enc = new TextEncoder(), salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
 const ITER = 310000;
 const base = await crypto.subtle.importKey('raw', enc.encode(PASS.trim().toUpperCase()), 'PBKDF2', false, ['deriveKey']);
@@ -148,5 +171,5 @@ const b64 = u => Buffer.from(u).toString('base64');
 await mkdir(OUT, { recursive: true });
 await cp('site', OUT, { recursive: true });
 await writeFile(`${OUT}/data.enc.json`, JSON.stringify({ v: 1, iter: ITER, salt: b64(salt), iv: b64(iv), ct: b64(ct), at: data.generatedAt }));
-console.log(`OK: ${opps.length} leads in "${pipe.name}", ${Object.keys(convByContact).length} conversations, ${calls} API calls`);
+console.log(`OK: ${leads.length} leads (contacts), ${opps.length} deals in ${pipelines.length} pipelines, ${Object.keys(convByContact).length} conversations, ${calls} API calls`);
 console.log('KPIs', JSON.stringify(kpis));
