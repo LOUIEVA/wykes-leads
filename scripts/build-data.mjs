@@ -109,6 +109,22 @@ for (const [i, c] of contacts.entries()) {
     size: short(f.job_size, 40), message: short(f.job_message, 160), ballpark: short(f.ballpark_text, 60),
     source: short(c.source || (c.attributionSource && (c.attributionSource.sessionSource || c.attributionSource.medium)) || f.utm_source || '', 30),
   });
+  if (i < DETAIL_LIMIT) {
+    const strip = h => String(h || '').replace(/<br\s*\/?>(?!$)/gi, ' ').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+    try {
+      const n = await api(`/contacts/${c.id}/notes`);
+      lead.notes = (n.notes || []).sort((a, b) => ts(b.dateAdded) - ts(a.dateAdded)).slice(0, 4).map(x => ({ text: short(strip(x.body), 300), at: x.dateAdded }));
+      lead.noteCount = (n.notes || []).length;
+    } catch (e) { lead.notes = []; }
+    try {
+      const t = await api(`/contacts/${c.id}/tasks`);
+      lead.tasks = (t.tasks || []).filter(x => !x.completed).sort((a, b) => ts(a.dueDate) - ts(b.dueDate)).slice(0, 5).map(x => ({ title: short(x.title, 120), body: short(strip(x.body), 160), due: x.dueDate }));
+    } catch (e) { lead.tasks = []; }
+    try {
+      const a = await api(`/contacts/${c.id}/appointments`);
+      lead.appointments = (a.events || []).filter(x => ts(x.endTime || x.startTime) >= now - DAY && !/cancel/i.test(x.appointmentStatus || '')).sort((a2, b2) => ts(a2.startTime) - ts(b2.startTime)).slice(0, 3).map(x => ({ title: short(x.title, 80), start: x.startTime, status: x.appointmentStatus || '' }));
+    } catch (e) { lead.appointments = []; }
+  }
   if (i < DETAIL_LIMIT && conv) {
     try {
       const m = await api(`/conversations/${conv.id}/messages?limit=100`, { version: '2021-04-15' });
@@ -140,6 +156,17 @@ const kpis = {
   won30: won30.length, wonValue30: sum(won30), wonAll: inB('won').length,
   nurture: inB('nurture').length, lost: inB('lost').length, totalLeads: leads.length,
 };
+const dublinEndOfToday = startOfToday + DAY;
+const reminders = leads.flatMap(l => (l.tasks || []).map(t => ({ title: t.title, body: t.body, due: t.due, contactId: l.contactId, name: l.name, phone: l.phone })))
+  .sort((a, b) => (ts(a.due) || 9e15) - (ts(b.due) || 9e15)).slice(0, 25);
+const visits = leads.flatMap(l => (l.appointments || []).map(a => ({ title: a.title, start: a.start, status: a.status, contactId: l.contactId, name: l.name, town: l.town })))
+  .sort((a, b) => ts(a.start) - ts(b.start)).slice(0, 10);
+Object.assign(kpis, {
+  remindersOpen: reminders.length,
+  remindersOverdue: reminders.filter(r => r.due && ts(r.due) < now).length,
+  remindersToday: reminders.filter(r => r.due && ts(r.due) >= now && ts(r.due) < dublinEndOfToday).length,
+  upcomingVisits: visits.length,
+});
 const stageCounts = [];
 pipelines.forEach(p => {
   const inPipe = leads.filter(l => l.pipeline === p.name);
@@ -158,7 +185,7 @@ const sources = Object.entries(srcCount).map(([name, n]) => ({ name, count: n })
 
 const data = {
   generatedAt: new Date().toISOString(), pipeline: mainPipe ? mainPipe.name : '', ghlBase: `https://app.gohighlevel.com/v2/location/${L}`,
-  kpis, stages: stageCounts, weekly, sources, leads: leads.slice(0, 80),
+  kpis, reminders, visits, stages: stageCounts, weekly, sources, leads: leads.slice(0, 80),
 };
 
 // 7. Encrypt with the passcode (PBKDF2-SHA256 -> AES-256-GCM) and write the site
@@ -171,5 +198,5 @@ const b64 = u => Buffer.from(u).toString('base64');
 await mkdir(OUT, { recursive: true });
 await cp('site', OUT, { recursive: true });
 await writeFile(`${OUT}/data.enc.json`, JSON.stringify({ v: 1, iter: ITER, salt: b64(salt), iv: b64(iv), ct: b64(ct), at: data.generatedAt }));
-console.log(`OK: ${leads.length} leads (contacts), ${opps.length} deals in ${pipelines.length} pipelines, ${Object.keys(convByContact).length} conversations, ${calls} API calls`);
+console.log(`OK: ${leads.length} leads (contacts), ${opps.length} deals in ${pipelines.length} pipelines, ${Object.keys(convByContact).length} conversations, ${reminders.length} open reminders, ${leads.reduce((n, l) => n + (l.noteCount || 0), 0)} notes, ${visits.length} upcoming visits, ${calls} API calls`);
 console.log('KPIs', JSON.stringify(kpis));

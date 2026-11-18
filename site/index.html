@@ -111,6 +111,19 @@
   .src { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--stone-2); font-size: 14px; }
   .src:last-child { border: 0; }
 
+  .rem { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px 0; border-bottom: 1px solid var(--stone-2); font-size: 15px; }
+  .rem:last-child { border: 0; }
+  .rem .t { font-weight: 600; }
+  .rem .who { color: var(--muted); font-size: 14px; }
+  .rem .who a { color: var(--green); font-weight: 600; text-decoration: none; }
+  .rem .due { font-size: 13px; font-weight: 600; text-align: right; white-space: nowrap; }
+  .due.over { color: var(--red); } .due.today { color: var(--amber); } .due.later { color: var(--muted); }
+  .sub-block { border-top: 1px solid var(--stone-2); padding-top: 8px; display: grid; gap: 6px; }
+  .sub-block h4 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .note { font-size: 14px; color: #34413a; }
+  .note small, .task small { color: var(--muted); }
+  .task { font-size: 14px; display: flex; justify-content: space-between; gap: 10px; }
+  .muted { color: var(--muted); font-size: 14px; margin: 0; }
   footer { margin: 34px 0 40px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
   .linkbtn { background: none; border: 0; color: var(--green); font-weight: 600; cursor: pointer; padding: 8px 0; text-decoration: underline; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
@@ -146,6 +159,11 @@
 
   <main class="wrap">
     <div class="kpis" id="kpis"></div>
+
+    <section class="two" id="todo">
+      <div class="panel"><h2>Reminders</h2><div id="reminders"></div></div>
+      <div class="panel"><h2>Upcoming site visits</h2><div id="visits"></div></div>
+    </section>
 
     <section aria-labelledby="leadsTitle">
       <div class="sec-head"><h2 id="leadsTitle">Leads</h2><span id="leadCount"></span></div>
@@ -188,6 +206,15 @@
     if (s < 604800) return Math.floor(s / 86400) + ' days ago';
     return new Date(iso).toLocaleDateString('en-IE', { day: 'numeric', month: 'short' });
   }
+  function dueLabel(iso) {
+    if (!iso) return ['No date', 'later'];
+    var t = new Date(iso).getTime(), now = Date.now();
+    var dayFmt = function (o) { return new Date(iso).toLocaleString('en-IE', Object.assign({ timeZone: 'Europe/Dublin' }, o)); };
+    var today = dayFmt({ year: 'numeric', month: 'numeric', day: 'numeric' }) === new Date().toLocaleString('en-IE', { timeZone: 'Europe/Dublin', year: 'numeric', month: 'numeric', day: 'numeric' });
+    if (t < now) return ['Overdue · ' + dayFmt({ day: 'numeric', month: 'short' }), 'over'];
+    if (today) return ['Today ' + dayFmt({ hour: '2-digit', minute: '2-digit' }), 'today'];
+    return [dayFmt({ weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }), 'later'];
+  }
   var b64 = function (s) { return Uint8Array.from(atob(s), function (c) { return c.charCodeAt(0); }); };
 
   async function decrypt(file, code) {
@@ -219,7 +246,8 @@
     ['owner', 'Waiting on you', isB('owner')],
     ['booked', 'Visit booked', isB('booked')],
     ['quote', 'Quote sent', isB('quote')],
-    ['won', 'Won', isB('won')]
+    ['won', 'Won', isB('won')],
+    ['tasks', 'Has a reminder', function (l) { return l.tasks && l.tasks.length; }]
   ];
   var fn = function (id) { return (FILTERS.find(function (f) { return f[0] === id; }) || FILTERS[0])[2]; };
 
@@ -232,7 +260,7 @@
       ['booked', 'Site visits booked', k.visitsBooked, 'Booked, not yet quoted', ''],
       ['quote', 'Quotes out', k.quotesOut, euro(k.quotesValue) + ' waiting', ''],
       ['won', 'Won', k.won30, euro(k.wonValue30) + ' in 30 days', 'good'],
-      ['all', 'All leads', k.totalLeads, k.nurture + ' not ready yet · ' + k.lost + ' lost', '']
+      ['tasks', 'Reminders due', (k.remindersOverdue || 0) + (k.remindersToday || 0), (k.remindersOpen || 0) + ' open · ' + (k.remindersOverdue || 0) + ' overdue', k.remindersOverdue ? 'alert' : '']
     ];
     $('kpis').innerHTML = tiles.map(function (t) {
       return '<button type="button" class="kpi ' + t[4] + (state.filter === t[0] ? ' active' : '') + '" data-f="' + t[0] + '"><div class="label">' + t[1] + '</div><div class="num">' + t[2] + '</div><div class="sub">' + esc(t[3]) + '</div></button>';
@@ -261,6 +289,10 @@
         ['Town', esc(l.town)], ['Job', esc(l.service)], ['When', esc(l.timeframe)], ['Size', esc(l.size)],
         ['Value', l.value ? euro(l.value) : ''], ['Source', esc(l.source)], ['Added', esc(added)]
       ].filter(function (r) { return r[1]; });
+      var extra = '';
+      if (l.appointments && l.appointments.length) extra += '<div class="sub-block"><h4>Site visit</h4>' + l.appointments.map(function (a) { var dl = dueLabel(a.start); return '<div class="task"><span>' + esc(a.title || 'Appointment') + '</span><small>' + esc(dl[0].replace('Overdue · ', '')) + '</small></div>'; }).join('') + '</div>';
+      if (l.tasks && l.tasks.length) extra += '<div class="sub-block"><h4>Reminders</h4>' + l.tasks.map(function (t) { var dl = dueLabel(t.due); return '<div class="task"><span>' + esc(t.title) + '</span><small class="due ' + dl[1] + '">' + esc(dl[0]) + '</small></div>'; }).join('') + '</div>';
+      if (l.notes && l.notes.length) extra += '<div class="sub-block"><h4>Notes' + (l.noteCount > l.notes.length ? ' (latest ' + l.notes.length + ' of ' + l.noteCount + ')' : '') + '</h4>' + l.notes.slice(0, 3).map(function (n) { return '<div class="note">' + esc(n.text) + ' <small>' + esc(ago(n.at)) + '</small></div>'; }).join('') + '</div>';
       var details = '<dl class="details">' + rows.map(function (r) { return '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>'; }).join('') + '</dl>';
       var flags = [];
       if (l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost') flags.push('<span class="tag warn">Needs a reply</span>');
@@ -270,7 +302,7 @@
       return '<article class="lead' + (l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost' ? ' flag' : '') + '">' +
         '<div class="lead-top"><h3>' + esc(l.name) + '</h3><span class="when">' + esc(ago(l.createdAt)) + '</span></div>' +
         details +
-        '<div class="tags">' + stageTag(l) + flags.join('') + '</div>' + msg +
+        '<div class="tags">' + stageTag(l) + flags.join('') + '</div>' + msg + extra +
         '<div class="actions">' +
           (tel ? '<a class="btn" href="tel:' + esc(tel) + '">Call</a><a class="btn ghost" href="https://wa.me/' + esc(wa) + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
           (l.email && !tel ? '<a class="btn" href="mailto:' + esc(l.email) + '">Email</a>' : '') +
@@ -293,6 +325,18 @@
     }).join('');
     $('sources').innerHTML = d.sources.length ? d.sources.map(function (s) { return '<div class="src"><span>' + esc(s.name) + '</span><b>' + s.count + '</b></div>'; }).join('') : '<p style="margin:0;color:var(--muted)">Shows once leads come in.</p>';
   }
+  function renderTodo(d) {
+    var crm = function (id) { return esc(d.ghlBase + '/contacts/detail/' + id); };
+    var r = d.reminders || [], v = d.visits || [];
+    $('reminders').innerHTML = r.length ? r.slice(0, 8).map(function (t) {
+      var dl = dueLabel(t.due);
+      return '<div class="rem"><span class="t">' + esc(t.title) + '</span><span class="due ' + dl[1] + '">' + esc(dl[0]) + '</span><span class="who"><a href="' + crm(t.contactId) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>' + (t.body ? ' · ' + esc(t.body) : '') + '</span></div>';
+    }).join('') + (r.length > 8 ? '<p class="muted">+' + (r.length - 8) + ' more. Tap "Has a reminder" below.</p>' : '') : '<p class="muted">No open reminders. Tasks you add to a contact in the CRM show here.</p>';
+    $('visits').innerHTML = v.length ? v.map(function (a) {
+      var dl = dueLabel(a.start);
+      return '<div class="rem"><span class="t">' + esc(a.name) + '</span><span class="due today">' + esc(dl[0].replace('Overdue · ', '')) + '</span><span class="who">' + esc([a.town, a.title].filter(Boolean).join(' · ')) + '</span></div>';
+    }).join('') : '<p class="muted">No site visits booked yet. Booked appointments show here.</p>';
+  }
   function render() {
     var d = state.data, k = d.kpis;
     var h = Number(new Date().toLocaleString('en-IE', { hour: 'numeric', hour12: false, timeZone: 'Europe/Dublin' }));
@@ -300,10 +344,11 @@
     var bits = [];
     bits.push(k.new7 + (k.new7 === 1 ? ' new lead' : ' new leads') + ' this week');
     if (k.needsReply) bits.push(k.needsReply + ' waiting for a reply');
+    if (k.remindersOverdue) bits.push(k.remindersOverdue + (k.remindersOverdue === 1 ? ' reminder' : ' reminders') + ' overdue');
     if (k.sentToOwner) bits.push(k.sentToOwner + ' need a site visit day from you');
     $('summary').textContent = bits.join(', ') + '.';
     $('ago').textContent = ago(d.generatedAt);
-    renderKpis(k); renderChips(d.leads); renderLeads(d); renderPanels(d);
+    renderKpis(k); renderTodo(d); renderChips(d.leads); renderLeads(d); renderPanels(d);
   }
   function setFilter(f) { state.filter = f; render(); }
 
