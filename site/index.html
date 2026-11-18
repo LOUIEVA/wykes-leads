@@ -82,6 +82,10 @@
   .tag.warn { background: var(--amber-soft); color: var(--amber); }
   .tag.grey { background: var(--stone-2); color: var(--muted); }
   .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .details { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 14px; }
+  .details dt { color: var(--muted); }
+  .details dd { margin: 0; word-break: break-word; }
+  .details a { color: var(--green); font-weight: 600; text-decoration: none; }
   .msg { background: var(--stone); border-radius: 10px; padding: 9px 11px; font-size: 14px; color: #34413a; }
   .msg b { font-weight: 600; }
   .actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -250,7 +254,14 @@
     if (!list.length) { $('leads').innerHTML = '<div class="empty"><b>Nothing here right now</b>Pick another filter to see the rest.</div>'; return; }
     $('leads').innerHTML = list.map(function (l) {
       var tel = (l.phone || '').replace(/[^\d+]/g, ''), wa = tel.replace(/^\+/, '').replace(/^0/, '353');
-      var meta = [l.service, l.town, l.timeframe, l.size].filter(Boolean).map(function (x) { return '<span>' + esc(x) + '</span>'; }).join('');
+      var added = l.createdAt ? new Date(l.createdAt).toLocaleString('en-IE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Dublin' }) : '';
+      var rows = [
+        ['Phone', l.phone ? '<a href="tel:' + esc(tel) + '">' + esc(l.phone) + '</a>' : ''],
+        ['Email', l.email ? '<a href="mailto:' + esc(l.email) + '">' + esc(l.email) + '</a>' : ''],
+        ['Town', esc(l.town)], ['Job', esc(l.service)], ['When', esc(l.timeframe)], ['Size', esc(l.size)],
+        ['Value', l.value ? euro(l.value) : ''], ['Source', esc(l.source)], ['Added', esc(added)]
+      ].filter(function (r) { return r[1]; });
+      var details = '<dl class="details">' + rows.map(function (r) { return '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>'; }).join('') + '</dl>';
       var flags = [];
       if (l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost') flags.push('<span class="tag warn">Needs a reply</span>');
       else if (l.replied) flags.push('<span class="tag grey">Replied</span>');
@@ -258,10 +269,11 @@
       var msg = l.lastMessage && l.lastMessage.text ? '<div class="msg"><b>' + (l.lastMessage.dir === 'inbound' ? esc(l.name.split(' ')[0]) : 'You') + ' (' + esc(ago(l.lastMessage.at)) + '):</b> ' + esc(l.lastMessage.text) + '</div>' : (l.message ? '<div class="msg"><b>Their job:</b> ' + esc(l.message) + '</div>' : '');
       return '<article class="lead' + (l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost' ? ' flag' : '') + '">' +
         '<div class="lead-top"><h3>' + esc(l.name) + '</h3><span class="when">' + esc(ago(l.createdAt)) + '</span></div>' +
-        (meta ? '<div class="meta">' + meta + '</div>' : '') +
+        details +
         '<div class="tags">' + stageTag(l) + flags.join('') + '</div>' + msg +
         '<div class="actions">' +
           (tel ? '<a class="btn" href="tel:' + esc(tel) + '">Call</a><a class="btn ghost" href="https://wa.me/' + esc(wa) + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
+          (l.email && !tel ? '<a class="btn" href="mailto:' + esc(l.email) + '">Email</a>' : '') +
           '<a class="btn ghost" href="' + esc(d.ghlBase + '/contacts/detail/' + l.contactId) + '" target="_blank" rel="noopener">Open in CRM</a>' +
         '</div></article>';
     }).join('');
