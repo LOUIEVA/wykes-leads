@@ -5,6 +5,9 @@ name: Watch GHL for changes
 # The schedule below only restarts the chain if it ever breaks.
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [scripts/watch.mjs, .github/workflows/watch.yml]
   schedule:
     - cron: "11,41 * * * *"
 

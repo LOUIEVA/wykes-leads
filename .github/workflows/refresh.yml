@@ -41,6 +41,17 @@ jobs:
           path: dist
       - id: deploy
         uses: actions/deploy-pages@v4
+      - name: Make sure the GHL watcher is running
+        if: always()
+        run: |
+          n=$(gh api "repos/${{ github.repository }}/actions/workflows/watch.yml/runs?per_page=5" -q '[.workflow_runs[] | select(.status=="in_progress" or .status=="queued" or .status=="pending" or .status=="waiting")] | length' || echo 1)
+          if [ "$n" = "0" ]; then
+            gh api -X POST "repos/${{ github.repository }}/actions/workflows/watch.yml/dispatches" -f ref=main && echo "watcher restarted"
+          else
+            echo "watcher already running"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
       # GitHub pauses scheduled jobs in repos with no activity for 60 days. Re-enable once a day.
       - name: Keep the schedule alive
         if: github.event_name == 'schedule'
