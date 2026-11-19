@@ -168,10 +168,84 @@
   html.embed .kpis { padding-top: 14px; }
   html.embed .kpi { padding: 12px 14px; }
   html.embed .kpi .num { font-size: 30px; }
+
+  /* ===== Interactive leads ===== */
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 14px; }
+  .search { position: relative; flex: 1 1 220px; }
+  .search svg { position: absolute; left: 12px; top: 50%; width: 17px; height: 17px; transform: translateY(-50%); fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; }
+  .search input, .sort select { width: 100%; min-height: 42px; border: 1px solid var(--line); border-radius: 10px; background: var(--white); font: inherit; font-size: 15px; color: var(--ink); }
+  .search input { padding: 0 12px 0 38px; }
+  .sort select { padding: 0 34px 0 12px; }
+  .search input:focus, .sort select:focus { outline: 2px solid var(--green-2); outline-offset: 1px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--white); }
+  .seg button { min-height: 40px; padding: 0 13px; border: 0; background: none; font: inherit; font-size: 14px; font-weight: 500; color: var(--ink); cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--forest); color: #fff; }
+  .seg button:hover:not([aria-pressed="true"]) { background: var(--stone); }
+  .seg button:focus-visible { outline: 2px solid var(--green-2); outline-offset: -2px; }
+
+  .leads.list { grid-template-columns: 1fr !important; }
+  .lead { padding: 0 !important; gap: 0 !important; overflow: hidden; transition: box-shadow .2s, border-color .2s, transform .2s; border-left: 4px solid var(--line); }
+  .lead:hover { box-shadow: 0 6px 20px -12px rgba(30, 42, 32, .35); }
+  .lead.b-new { border-left-color: #8fb79a; } .lead.b-owner { border-left-color: var(--amber); } .lead.b-booked { border-left-color: var(--green-2); }
+  .lead.b-quote { border-left-color: #6b8f9e; } .lead.b-won { border-left-color: var(--green); } .lead.b-lost, .lead.b-nurture { border-left-color: #c9c3b5; }
+  .lead.flag { border-left-color: var(--amber) !important; }
+  .lead-head { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 12px 12px 12px 8px; cursor: pointer; user-select: none; }
+  .lead-head:focus-visible { outline: 2px solid var(--green-2); outline-offset: -2px; }
+  .handle { display: grid; place-items: center; width: 22px; height: 34px; color: #b3ad9f; cursor: grab; border-radius: 6px; touch-action: none; }
+  .handle:hover { background: var(--stone); color: var(--muted); }
+  .handle svg { width: 12px; height: 18px; fill: currentColor; }
+  .no-drag .handle { display: none; }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-weight: 600; font-size: 15px; background: var(--green-soft); color: #285232; flex: none; }
+  .b-owner .avatar, .flag .avatar { background: var(--amber-soft); color: var(--amber); }
+  .b-won .avatar { background: var(--green); color: #fff; }
+  .b-lost .avatar, .b-nurture .avatar { background: var(--stone-2); color: var(--muted); }
+  .lh-main { min-width: 0; }
+  .lh-main h3 { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lh-sub { font-size: 13.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+  .lh-sub .dot { margin: 0 5px; }
+  .lh-right { display: flex; align-items: center; gap: 6px; }
+  .lh-right .tag { white-space: nowrap; }
+  .lh-value { font-weight: 600; font-size: 14px; white-space: nowrap; }
+  .icon-btn { display: inline-grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--white); color: var(--green); }
+  .icon-btn:hover { background: var(--green-soft); border-color: #a9cfb2; }
+  .icon-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .chev { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); transition: transform .25s, background .2s; }
+  .chev svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+  .lead-head:hover .chev { background: var(--stone); }
+  .lead.open .chev { transform: rotate(180deg); }
+  .lead-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .28s ease; }
+  .lead.open .lead-body { grid-template-rows: 1fr; }
+  .lead-inner { overflow: hidden; min-height: 0; }
+  .lead-content { display: grid; gap: 10px; padding: 2px 14px 14px; border-top: 1px solid var(--stone-2); padding-top: 12px; }
+  .lead:not(.open) .lead-inner { visibility: hidden; transition: visibility 0s .28s; }
+  .lead.open .lead-inner { visibility: visible; }
+  .lh-tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 12px 82px; margin-top: -4px; cursor: pointer; }
+  .tag.value { background: var(--forest); color: #fff; }
+  @media (max-width: 560px) {
+    .lead-head { grid-template-columns: auto minmax(0, 1fr) auto auto; padding-left: 12px; }
+    .handle { display: none; }
+    .lh-tags { padding-left: 62px; }
+  }
+  .sortable-ghost { opacity: .35; }
+  .sortable-chosen { box-shadow: 0 14px 30px -14px rgba(30, 42, 32, .55); transform: scale(1.01); }
+  .note-more { background: none; border: 0; padding: 4px 0 0; color: var(--green); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; text-align: left; }
+  .notes-block:not(.all) .note:nth-of-type(n+2) { display: none; }
+
+  /* Fold side panels */
+  .panel > h2 { display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
+  .panel > h2::after { content: ""; width: 9px; height: 9px; border-right: 2.5px solid var(--muted); border-bottom: 2.5px solid var(--muted); transform: rotate(45deg) translate(-2px, -2px); transition: transform .2s; }
+  .panel.folded > h2 { margin-bottom: 0; }
+  .panel.folded > h2::after { transform: rotate(-45deg); }
+  .panel.folded > .panel-body { display: none; }
+  .kpi { transition: transform .15s, box-shadow .15s, border-color .15s; }
+  .kpi:hover { transform: translateY(-2px); box-shadow: 0 8px 18px -12px rgba(30, 42, 32, .4); }
+  @media (prefers-reduced-motion: reduce) { .lead-body, .chev, .kpi, .lead { transition: none !important; } }
   footer { margin: 34px 0 40px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
   .linkbtn { background: none; border: 0; color: var(--green); font-weight: 600; cursor: pointer; padding: 8px 0; text-decoration: underline; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
+<script src="vendor/Sortable.min.js" defer></script>
 </head>
 <body>
 
@@ -207,20 +281,40 @@
 
     <div class="layout">
       <section class="area-todo" id="todo">
-        <div class="panel"><h2>Reminders</h2><div id="reminders"></div></div>
-        <div class="panel"><h2>Upcoming site visits</h2><div id="visits"></div></div>
+        <div class="panel" data-panel="reminders"><h2>Reminders</h2><div class="panel-body" id="reminders"></div></div>
+        <div class="panel" data-panel="visits"><h2>Upcoming site visits</h2><div class="panel-body" id="visits"></div></div>
       </section>
 
       <section class="area-leads" aria-labelledby="leadsTitle">
         <div class="sec-head"><h2 id="leadsTitle">Leads</h2><span id="leadCount"></span></div>
         <div class="chips" id="chips" role="group" aria-label="Filter leads"></div>
+        <div class="toolbar" role="toolbar" aria-label="Lead view options">
+          <label class="search"><span class="sr">Search leads</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="q" type="search" placeholder="Search name, town, job, phone" autocomplete="off"></label>
+          <label class="sort"><span class="sr">Sort leads</span>
+            <select id="sort">
+              <option value="attention">Needs attention first</option>
+              <option value="newest">Newest first</option>
+              <option value="value">Highest value</option>
+              <option value="custom">My order (drag to move)</option>
+            </select></label>
+          <div class="seg" role="group" aria-label="Layout">
+            <button type="button" data-view="grid" aria-pressed="true" title="Cards side by side">Grid</button>
+            <button type="button" data-view="list" aria-pressed="false" title="One lead per row">List</button>
+          </div>
+          <div class="seg" role="group" aria-label="Fold">
+            <button type="button" id="expandAll">Expand all</button>
+            <button type="button" id="foldAll">Fold all</button>
+          </div>
+        </div>
         <div class="leads" id="leads"></div>
       </section>
 
       <section class="area-stats">
-        <div class="panel"><h2>Where each lead is</h2><div id="stages"></div></div>
-        <div class="panel"><h2>New leads per week</h2><div class="weeks" id="weeks"></div></div>
-        <div class="panel"><h2>Where leads come from</h2><div id="sources"></div></div>
+        <div class="panel" data-panel="stages"><h2>Where each lead is</h2><div class="panel-body" id="stages"></div></div>
+        <div class="panel" data-panel="weeks"><h2>New leads per week</h2><div class="panel-body weeks" id="weeks"></div></div>
+        <div class="panel" data-panel="sources"><h2>Where leads come from</h2><div class="panel-body" id="sources"></div></div>
       </section>
     </div>
 
@@ -323,6 +417,55 @@
     if (changed) savePending();
   }
   function busy() { return [].some.call(document.querySelectorAll('.upd[open] textarea, .upd[open] select'), function (el) { return el.value; }); }
+  var UKEY = 'wykesLeadsUI';
+  var UI = (function () { try { return Object.assign({ open: {}, order: [], sort: 'attention', view: 'grid', panels: {}, notes: {} }, JSON.parse(localStorage.getItem(UKEY) || '{}')); } catch (e) { return { open: {}, order: [], sort: 'attention', view: 'grid', panels: {}, notes: {} }; } })();
+  function saveUI() { try { localStorage.setItem(UKEY, JSON.stringify(UI)); } catch (e) {} }
+  var ICON = {
+    grip: '<svg viewBox="0 0 12 18"><circle cx="3" cy="3" r="1.6"/><circle cx="9" cy="3" r="1.6"/><circle cx="3" cy="9" r="1.6"/><circle cx="9" cy="9" r="1.6"/><circle cx="3" cy="15" r="1.6"/><circle cx="9" cy="15" r="1.6"/></svg>',
+    phone: '<svg viewBox="0 0 24 24"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg>',
+    chev: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>'
+  };
+  function initials(n) { var p = String(n || '?').replace(/\(.*?\)/g, '').trim().split(/\s+/).filter(function (w) { return /[A-Za-z]/.test(w) && w !== 'TEST'; }); return ((p[0] || '?')[0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase(); }
+  function attention(l) {
+    var s = 0;
+    if (l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost') s += 100;
+    if (l.bucket === 'owner') s += 80;
+    if ((l.tasks || []).some(function (t) { return t.due && new Date(t.due).getTime() < Date.now() + 864e5; })) s += 60;
+    if (l.bucket === 'new') s += 40;
+    if (l.bucket === 'booked' || l.bucket === 'quote') s += 20;
+    if (l.bucket === 'won' || l.bucket === 'lost' || l.bucket === 'nurture') s -= 50;
+    return s;
+  }
+  function sortLeads(list) {
+    var by = UI.sort, t = function (x) { return new Date(x.createdAt || 0).getTime(); };
+    var c = list.slice();
+    if (by === 'newest') c.sort(function (a, b) { return t(b) - t(a); });
+    else if (by === 'value') c.sort(function (a, b) { return (b.value || 0) - (a.value || 0) || t(b) - t(a); });
+    else if (by === 'custom') {
+      var pos = {}; UI.order.forEach(function (id, i) { pos[id] = i; });
+      c.sort(function (a, b) { var pa = a.contactId in pos ? pos[a.contactId] : -1, pb = b.contactId in pos ? pos[b.contactId] : -1; if (pa === -1 && pb === -1) return t(b) - t(a); if (pa === -1) return -1; if (pb === -1) return 1; return pa - pb; });
+    } else c.sort(function (a, b) { return attention(b) - attention(a) || t(b) - t(a); });
+    return c;
+  }
+  function isOpen(l, total) {
+    if (l.contactId in UI.open) return UI.open[l.contactId];
+    return total <= 2 || (l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost') || l.bucket === 'owner';
+  }
+  var sortable = null;
+  function setupSortable() {
+    var el = $('leads');
+    if (!window.Sortable) { el.classList.add('no-drag'); return; }
+    el.classList.remove('no-drag');
+    if (sortable) return;
+    sortable = window.Sortable.create(el, {
+      handle: '.handle', draggable: '.lead', animation: 180, ghostClass: 'sortable-ghost', chosenClass: 'sortable-chosen', delay: 80, delayOnTouchOnly: true,
+      onEnd: function () {
+        var ids = [].map.call(el.querySelectorAll('.lead'), function (a) { return a.getAttribute('data-cid'); });
+        var rest = UI.order.filter(function (id) { return ids.indexOf(id) === -1; });
+        UI.order = ids.concat(rest); UI.sort = 'custom'; saveUI(); $('sort').value = 'custom';
+      }
+    });
+  }
   var isB = function (x) { return function (l) { return l.bucket === x; }; };
   var FILTERS = [
     ['all', 'All', function () { return true; }],
@@ -359,13 +502,17 @@
     }).join('');
   }
   function renderLeads(d) {
-    var list = d.leads.filter(fn(state.filter));
+    var q = ($('q').value || '').trim().toLowerCase();
+    var list = d.leads.filter(fn(state.filter)).filter(function (l) {
+      if (!q) return true;
+      return [l.name, l.town, l.service, l.phone, l.email, l.stage, l.message].join(' ').toLowerCase().indexOf(q) !== -1;
+    });
+    list = sortLeads(list);
     $('leadCount').textContent = list.length + (list.length === 1 ? ' lead' : ' leads');
-    if (!d.leads.length) {
-      $('leads').innerHTML = '<div class="empty"><b>No leads yet</b>New enquiries from the website and WhatsApp show up here within 5 minutes.</div>';
-      return;
-    }
-    if (!list.length) { $('leads').innerHTML = '<div class="empty"><b>Nothing here right now</b>Pick another filter to see the rest.</div>'; return; }
+    $('leads').classList.toggle('list', UI.view === 'list');
+    if (!d.leads.length) { $('leads').innerHTML = '<div class="empty"><b>No leads yet</b>New enquiries from the website and WhatsApp show up here within 5 minutes.</div>'; return; }
+    if (!list.length) { $('leads').innerHTML = '<div class="empty"><b>Nothing matches</b>' + (q ? 'Try a different search.' : 'Pick another filter to see the rest.') + '</div>'; return; }
+    var total = list.length;
     $('leads').innerHTML = list.map(function (l) {
       var tel = (l.phone || '').replace(/[^\d+]/g, ''), wa = tel.replace(/^\+/, '').replace(/^0/, '353');
       var added = l.createdAt ? new Date(l.createdAt).toLocaleString('en-IE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Dublin' }) : '';
@@ -378,24 +525,42 @@
       var extra = '';
       if (l.appointments && l.appointments.length) extra += '<div class="sub-block"><h4>Site visit</h4>' + l.appointments.map(function (a) { var dl = dueLabel(a.start); return '<div class="task"><span>' + esc(a.title || 'Appointment') + '</span><small>' + esc(dl[0].replace('Overdue · ', '')) + '</small></div>'; }).join('') + '</div>';
       if (l.tasks && l.tasks.length) extra += '<div class="sub-block"><h4>Reminders</h4>' + l.tasks.map(function (t) { var dl = dueLabel(t.due); return '<div class="task"><span>' + esc(t.title) + '</span><small class="due ' + dl[1] + '">' + esc(dl[0]) + '</small></div>'; }).join('') + '</div>';
-      if (l.notes && l.notes.length) extra += '<div class="sub-block"><h4>Notes' + (l.noteCount > l.notes.length ? ' (latest ' + l.notes.length + ' of ' + l.noteCount + ')' : '') + '</h4>' + l.notes.slice(0, 3).map(function (n) { return '<div class="note">' + esc(n.text) + ' <small>' + esc(ago(n.at)) + '</small></div>'; }).join('') + '</div>';
+      if (l.notes && l.notes.length) {
+        var allNotes = !!UI.notes[l.contactId], more = l.notes.length > 1;
+        extra += '<div class="sub-block notes-block' + (allNotes ? ' all' : '') + '"><h4>Notes (' + (l.noteCount || l.notes.length) + ')</h4>' +
+          l.notes.map(function (n) { return '<div class="note">' + esc(n.text) + ' <small>' + esc(ago(n.at)) + '</small></div>'; }).join('') +
+          (more ? '<button type="button" class="note-more" data-notes="' + esc(l.contactId) + '">' + (allNotes ? 'Show latest only' : 'Show all ' + l.notes.length + ' notes') + '</button>' : '') + '</div>';
+      }
       var details = '<dl class="details">' + rows.map(function (r) { return '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>'; }).join('') + '</dl>';
-      var flags = [];
-      if (l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost') flags.push('<span class="tag warn">Needs a reply</span>');
+      var flags = [], needs = l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost';
+      if (needs) flags.push('<span class="tag warn">Needs a reply</span>');
       else if (l.replied) flags.push('<span class="tag grey">Replied</span>');
-      if (l.ballpark) flags.push('<span class="tag grey">' + esc(l.ballpark) + '</span>');
+      var headTags = stageTag(l) + (needs ? '<span class="tag warn">Needs a reply</span>' : '');
       var msg = l.lastMessage && l.lastMessage.text ? '<div class="msg"><b>' + (l.lastMessage.dir === 'inbound' ? esc(l.name.split(' ')[0]) : 'You') + ' (' + esc(ago(l.lastMessage.at)) + '):</b> ' + esc(l.lastMessage.text) + '</div>' : (l.message ? '<div class="msg"><b>Their job:</b> ' + esc(l.message) + '</div>' : '');
-      return '<article class="lead' + (l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost' ? ' flag' : '') + '">' +
-        '<div class="lead-top"><h3>' + esc(l.name) + '</h3><span class="when">' + esc(ago(l.createdAt)) + '</span></div>' +
-        details +
-        '<div class="tags">' + stageTag(l) + flags.join('') + '</div>' + pendingLine(l) + msg + extra + updateForm(l) +
-        '<div class="actions">' +
-          (tel ? '<a class="btn" href="tel:' + esc(tel) + '">Call</a><a class="btn ghost" href="https://wa.me/' + esc(wa) + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
-          (l.email && !tel ? '<a class="btn" href="mailto:' + esc(l.email) + '">Email</a>' : '') +
-          (l.bucket !== 'won' && l.bucket !== 'lost' ? '<button type="button" class="btn ghost" data-book="' + esc(l.contactId) + '">Book site visit</button>' : '') +
-          '<a class="btn ghost" href="' + esc(d.ghlBase + '/contacts/detail/' + l.contactId) + '" target="_blank" rel="noopener">Open in CRM</a>' +
-        '</div></article>';
+      var open = isOpen(l, total);
+      var sub = [l.service, l.town, ago(l.createdAt)].filter(Boolean).map(esc).join('<span class="dot">·</span>');
+      return '<article class="lead b-' + esc(l.bucket || 'new') + (needs ? ' flag' : '') + (open ? ' open' : '') + '" data-cid="' + esc(l.contactId) + '">' +
+        '<div class="lead-head" role="button" tabindex="0" aria-expanded="' + open + '" data-toggle>' +
+          '<span class="handle" title="Drag to move" aria-label="Drag to move this lead">' + ICON.grip + '</span>' +
+          '<span class="avatar" aria-hidden="true">' + esc(initials(l.name)) + '</span>' +
+          '<div class="lh-main"><h3>' + esc(l.name) + '</h3><div class="lh-sub">' + sub + '</div></div>' +
+          '<div class="lh-right">' +
+            (tel ? '<a class="icon-btn" href="tel:' + esc(tel) + '" title="Call ' + esc(l.name) + '" aria-label="Call ' + esc(l.name) + '">' + ICON.phone + '</a>' : '') + '</div>' +
+          '<span class="chev" aria-hidden="true">' + ICON.chev + '</span>' +
+        '</div>' +
+        '<div class="lh-tags" data-toggle>' + headTags + (l.value ? '<span class="tag value">' + euro(l.value) + '</span>' : '') + '</div>' +
+        '<div class="lead-body"><div class="lead-inner"><div class="lead-content">' +
+          details +
+          '<div class="tags">' + stageTag(l) + flags.join('') + (l.ballpark ? '<span class="tag grey">' + esc(l.ballpark) + '</span>' : '') + '</div>' + pendingLine(l) + msg + extra + updateForm(l) +
+          '<div class="actions">' +
+            (tel ? '<a class="btn" href="tel:' + esc(tel) + '">Call</a><a class="btn ghost" href="https://wa.me/' + esc(wa) + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
+            (l.email && !tel ? '<a class="btn" href="mailto:' + esc(l.email) + '">Email</a>' : '') +
+            (l.bucket !== 'won' && l.bucket !== 'lost' ? '<button type="button" class="btn ghost" data-book="' + esc(l.contactId) + '">Book site visit</button>' : '') +
+            '<a class="btn ghost" href="' + esc(d.ghlBase + '/contacts/detail/' + l.contactId) + '" target="_blank" rel="noopener">Open in CRM</a>' +
+          '</div>' +
+        '</div></div></div></article>';
     }).join('');
+    setupSortable();
   }
   function renderPanels(d) {
     var max = Math.max.apply(null, d.stages.map(function (s) { return s.count; }).concat([1]));
@@ -458,9 +623,40 @@
   document.addEventListener('click', function (e) {
     var b = e.target.closest('[data-book]'); if (!b) return;
     var card = b.closest('.lead'), dt = card.querySelector('details.upd'), f = dt.querySelector('form');
-    dt.open = true; f.status.value = 'visit_booked'; f.querySelector('.visit-field').hidden = false;
+    toggleLead(card, true); dt.open = true; f.status.value = 'visit_booked'; f.querySelector('.visit-field').hidden = false;
     f.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); setTimeout(function () { f.visit.focus(); }, 250);
   });
+  function toggleLead(card, force) {
+    var open = typeof force === 'boolean' ? force : !card.classList.contains('open');
+    card.classList.toggle('open', open);
+    var h = card.querySelector('.lead-head'); if (h) h.setAttribute('aria-expanded', open);
+    UI.open[card.getAttribute('data-cid')] = open; saveUI();
+  }
+  document.addEventListener('click', function (e) {
+    var head = e.target.closest('[data-toggle]');
+    if (head && !e.target.closest('a, button, .handle')) { toggleLead(head.closest('.lead')); return; }
+    var nb = e.target.closest('[data-notes]');
+    if (nb) { var id = nb.getAttribute('data-notes'); UI.notes[id] = !UI.notes[id]; saveUI(); var blk = nb.closest('.notes-block'); blk.classList.toggle('all', UI.notes[id]); nb.textContent = UI.notes[id] ? 'Show latest only' : 'Show all ' + blk.querySelectorAll('.note').length + ' notes'; return; }
+    var vb = e.target.closest('[data-view]');
+    if (vb) { UI.view = vb.getAttribute('data-view'); saveUI(); document.querySelectorAll('[data-view]').forEach(function (x) { x.setAttribute('aria-pressed', x === vb); }); $('leads').classList.toggle('list', UI.view === 'list'); return; }
+    var ph = e.target.closest('.panel > h2');
+    if (ph) { var pnl = ph.parentElement, key = pnl.getAttribute('data-panel'); var f = !pnl.classList.contains('folded'); pnl.classList.toggle('folded', f); UI.panels[key] = f; saveUI(); }
+  });
+  document.addEventListener('keydown', function (e) {
+    var head = e.target.closest && e.target.closest('[data-toggle]');
+    if (head && (e.key === 'Enter' || e.key === ' ') && e.target === head) { e.preventDefault(); toggleLead(head.closest('.lead')); }
+  });
+  $('expandAll').addEventListener('click', function () { document.querySelectorAll('.lead').forEach(function (c) { toggleLead(c, true); }); });
+  $('foldAll').addEventListener('click', function () { document.querySelectorAll('.lead').forEach(function (c) { toggleLead(c, false); }); });
+  $('sort').addEventListener('change', function () { UI.sort = this.value; saveUI(); render(); });
+  var qTimer; $('q').addEventListener('input', function () { clearTimeout(qTimer); qTimer = setTimeout(function () { if (state.data) renderLeads(state.data); }, 150); });
+  function applyUIControls() {
+    $('sort').value = UI.sort;
+    document.querySelectorAll('[data-view]').forEach(function (x) { x.setAttribute('aria-pressed', x.getAttribute('data-view') === UI.view); });
+    document.querySelectorAll('.panel[data-panel]').forEach(function (p) { p.classList.toggle('folded', !!UI.panels[p.getAttribute('data-panel')]); });
+  }
+  applyUIControls();
+  window.addEventListener('load', function () { if (state.data) setupSortable(); });
   document.addEventListener('submit', async function (e) {
     var f = e.target; if (!f.closest || !f.closest('.upd')) return;
     e.preventDefault();
