@@ -303,6 +303,7 @@
     return '<details class="upd" data-cid="' + esc(l.contactId) + '"><summary>Update this lead</summary>' +
       '<form data-cid="' + esc(l.contactId) + '" data-name="' + esc(l.name) + '">' +
       '<label>Status<select name="status"><option value="">Choose a status...</option>' + STATUS.map(function (o) { return '<option value="' + o[0] + '">' + esc(o[1]) + '</option>'; }).join('') + '</select></label>' +
+      '<label class="visit-field" hidden>Site visit date and time<input type="datetime-local" name="visit"></label>' +
       '<label>Note<textarea name="note" placeholder="What happened? e.g. Spoke to her, wants charcoal composite, 25 m."></textarea></label>' +
       '<label>Remind me to call back (optional)<input type="datetime-local" name="remind"></label>' +
       '<div class="row2"><button class="btn" type="submit">Save to CRM</button></div>' +
@@ -310,7 +311,7 @@
   }
   function pendingLine(l) {
     var p = pending[l.contactId]; if (!p) return '';
-    return '<div class="pend">Saved to the CRM: <b>' + esc(p.label) + '</b>' + (p.note ? ' with a note' : '') + '. The stage updates within a few minutes.</div>';
+    return '<div class="pend">Saved to the CRM: <b>' + esc(p.label) + '</b>' + (p.note ? ' with a note' : '') + '. It shows in the CRM within a few minutes.</div>';
   }
   function clearDonePending(d) {
     var changed = false;
@@ -391,6 +392,7 @@
         '<div class="actions">' +
           (tel ? '<a class="btn" href="tel:' + esc(tel) + '">Call</a><a class="btn ghost" href="https://wa.me/' + esc(wa) + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
           (l.email && !tel ? '<a class="btn" href="mailto:' + esc(l.email) + '">Email</a>' : '') +
+          (l.bucket !== 'won' && l.bucket !== 'lost' ? '<button type="button" class="btn ghost" data-book="' + esc(l.contactId) + '">Book site visit</button>' : '') +
           '<a class="btn ghost" href="' + esc(d.ghlBase + '/contacts/detail/' + l.contactId) + '" target="_blank" rel="noopener">Open in CRM</a>' +
         '</div></article>';
     }).join('');
@@ -420,7 +422,7 @@
     $('visits').innerHTML = v.length ? v.map(function (a) {
       var dl = dueLabel(a.start);
       return '<div class="rem"><span class="t">' + esc(a.name) + '</span><span class="due today">' + esc(dl[0].replace('Overdue · ', '')) + '</span><span class="who">' + esc([a.town, a.title].filter(Boolean).join(' · ')) + '</span></div>';
-    }).join('') : '<p class="muted">No site visits booked yet. Booked appointments show here.</p>';
+    }).join('') : '<p class="muted">No site visits booked yet. Use "Book site visit" on a lead.</p>';
   }
   function render() {
     var d = state.data, k = d.kpis;
@@ -448,11 +450,23 @@
     } finally { $('openBtn').disabled = false; }
   }
 
+  document.addEventListener('change', function (e) {
+    if (e.target.name !== 'status' || !e.target.closest('.upd')) return;
+    var vf = e.target.form.querySelector('.visit-field'); vf.hidden = e.target.value !== 'visit_booked';
+    if (!vf.hidden) e.target.form.visit.focus();
+  });
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-book]'); if (!b) return;
+    var card = b.closest('.lead'), dt = card.querySelector('details.upd'), f = dt.querySelector('form');
+    dt.open = true; f.status.value = 'visit_booked'; f.querySelector('.visit-field').hidden = false;
+    f.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); setTimeout(function () { f.visit.focus(); }, 250);
+  });
   document.addEventListener('submit', async function (e) {
     var f = e.target; if (!f.closest || !f.closest('.upd')) return;
     e.preventDefault();
     var line = f.querySelector('.msgline'), btn = f.querySelector('button');
-    var key = f.status.value, text = f.note.value.trim().replace(/#s=/g, '').replace(/\|/g, '/'), when = f.remind.value;
+    var key = f.status.value, text = f.note.value.trim().replace(/#s=/g, '').replace(/\|/g, '/'), when = f.remind.value, visit = key === 'visit_booked' ? f.visit.value : '';
+    if (key === 'visit_booked' && !visit) { line.className = 'msgline bad'; line.textContent = 'Pick the site visit date and time.'; f.visit.focus(); return; }
     if (!key && !text) { line.className = 'msgline bad'; line.textContent = 'Pick a status or write a note first.'; return; }
     if (!state.data.hook) { line.className = 'msgline bad'; line.textContent = 'Saving is not switched on yet. Ask Louie.'; return; }
     key = key || 'note';
@@ -460,15 +474,18 @@
     if (key === 'note') label = 'Note';
     var remindIso = when ? new Date(when).toISOString() : '';
     var remindHuman = when ? new Date(when).toLocaleString('en-IE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
-    var body = '[Dashboard] ' + label + (remindHuman ? ' | Call back: ' + remindHuman : '') + (text ? ' | Note: ' + text : '') + ' | #s=' + key + ';r=' + remindIso;
+    var visitIso = visit ? new Date(visit).toISOString() : '';
+    var visitHuman = visit ? new Date(visit).toLocaleString('en-IE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+    if (visitHuman) label = 'Site visit booked for ' + visitHuman;
+    var body = '[Dashboard] ' + label + (remindHuman ? ' | Call back: ' + remindHuman : '') + (text ? ' | Note: ' + text : '') + ' | #s=' + key + ';r=' + remindIso + ';v=' + visitIso;
     btn.disabled = true; line.className = 'msgline'; line.textContent = 'Saving...';
     try {
       var res = await fetch(state.data.hook, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contact_id: f.getAttribute('data-cid'), status_key: key, outcome: label, note: body, remind_at: remindIso, source: 'Wykes leads dashboard', sent_at: new Date().toISOString() }) });
+        body: JSON.stringify({ contact_id: f.getAttribute('data-cid'), status_key: key, outcome: label, note: body, remind_at: remindIso, visit_at: visitIso, source: 'Wykes leads dashboard', sent_at: new Date().toISOString() }) });
       if (!res.ok) throw new Error(res.status);
       pending[f.getAttribute('data-cid')] = { label: label, note: !!text, at: Date.now() }; savePending();
       line.className = 'msgline ok'; line.textContent = 'Saved. The note is in the CRM now; the stage updates within a few minutes.';
-      f.reset(); setTimeout(function () { var dt = f.closest('details'); if (dt) dt.open = false; render(); }, 1800);
+      f.reset(); f.querySelector('.visit-field').hidden = true; setTimeout(function () { var dt = f.closest('details'); if (dt) dt.open = false; render(); }, 1800);
     } catch (err) {
       line.className = 'msgline bad'; line.textContent = 'Could not save. Check your signal and try again.';
     } finally { btn.disabled = false; }

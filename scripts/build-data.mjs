@@ -85,6 +85,7 @@ for (const c of contacts.slice(0, DETAIL_LIMIT)) {
     const body = stripHtml(n.body);
     const key = (body.match(/#s=([a-z_]+)/) || [])[1] || 'note';
     const remind = (body.match(/;r=([0-9T:.\-Z+]+)/) || [])[1];
+    const visit = (body.match(/;v=([0-9T:.\-Z+]+)/) || [])[1];
     const act = ACTIONS[key] || ACTIONS.note;
     const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || c.contactName || 'lead';
     try {
@@ -106,6 +107,12 @@ for (const c of contacts.slice(0, DETAIL_LIMIT)) {
         const title = `Call back ${name}`;
         const existing = ((await api(`/contacts/${c.id}/tasks`)).tasks || []).some(t => t.title === title && Math.abs(ts(t.dueDate) - Date.parse(remind)) < 6e4);
         if (!existing) await api(`/contacts/${c.id}/tasks`, { method: 'POST', body: { title, body: short(body.replace(/\s*\|?\s*#s=.*$/, '').replace(/^\[Dashboard\]\s*/, ''), 300), dueDate: new Date(remind).toISOString(), completed: false } });
+      }
+      if (visit && !isNaN(Date.parse(visit))) {
+        const town = ((c.customFields || []).find(cf => fieldKey[cf.id] === 'town_or_eircode') || {}).value || c.city || '';
+        const title = `Site visit: ${name}${town ? ', ' + town : ''}`;
+        const existing = ((await api(`/contacts/${c.id}/tasks`)).tasks || []).some(t => /^site visit/i.test(t.title) && Math.abs(ts(t.dueDate) - Date.parse(visit)) < 6e4);
+        if (!existing) await api(`/contacts/${c.id}/tasks`, { method: 'POST', body: { title, body: short(body.replace(/\s*\|?\s*#s=.*$/, '').replace(/^\[Dashboard\]\s*/, ''), 300), dueDate: new Date(visit).toISOString(), completed: false } });
       }
       const clean = '✓ ' + body.replace(/^\[Dashboard\]\s*/, '').replace(/\s*\|?\s*#s=.*$/, '') + ' (from the leads dashboard)';
       await api(`/contacts/${c.id}/notes/${n.id}`, { method: 'PUT', body: { body: clean } });
@@ -171,12 +178,16 @@ for (const [i, c] of contacts.entries()) {
     lead.noteCount = nList.length;
     try {
       const t = await api(`/contacts/${c.id}/tasks`);
-      lead.tasks = (t.tasks || []).filter(x => !x.completed).sort((a, b) => ts(a.dueDate) - ts(b.dueDate)).slice(0, 5).map(x => ({ title: short(x.title, 120), body: short(strip(x.body), 160), due: x.dueDate }));
-    } catch (e) { lead.tasks = []; }
+      const open = (t.tasks || []).filter(x => !x.completed).sort((a, b) => ts(a.dueDate) - ts(b.dueDate));
+      lead.tasks = open.filter(x => !/^site visit/i.test(x.title)).slice(0, 5).map(x => ({ title: short(x.title, 120), body: short(strip(x.body), 160), due: x.dueDate }));
+      lead.visitTasks = open.filter(x => /^site visit/i.test(x.title) && ts(x.dueDate) >= now - 12 * 36e5).slice(0, 3).map(x => ({ title: 'Site visit', start: x.dueDate, status: 'booked', note: short(strip(x.body), 160) }));
+    } catch (e) { lead.tasks = []; lead.visitTasks = []; }
     try {
       const a = await api(`/contacts/${c.id}/appointments`);
       lead.appointments = (a.events || []).filter(x => ts(x.endTime || x.startTime) >= now - DAY && !/cancel/i.test(x.appointmentStatus || '')).sort((a2, b2) => ts(a2.startTime) - ts(b2.startTime)).slice(0, 3).map(x => ({ title: short(x.title, 80), start: x.startTime, status: x.appointmentStatus || '' }));
     } catch (e) { lead.appointments = []; }
+    lead.appointments = (lead.appointments || []).concat(lead.visitTasks || []).sort((a2, b2) => ts(a2.start) - ts(b2.start)).slice(0, 3);
+    delete lead.visitTasks;
   }
   if (i < DETAIL_LIMIT && conv) {
     try {
