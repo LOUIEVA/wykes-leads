@@ -2,7 +2,7 @@ name: Refresh Wykes leads
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "23,53 * * * *"   # backup only; scripts/watch.mjs starts refreshes on change
   workflow_dispatch:
   push:
     branches: [main]
@@ -45,8 +45,10 @@ jobs:
       - name: Keep the schedule alive
         if: github.event_name == 'schedule'
         run: |
-          if [ "$(date -u +%H)" = "03" ] && [ "$(date -u +%M)" -lt 5 ]; then
-            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/refresh.yml/enable" && echo "re-enabled"
+          if [ "$(date -u +%H)" = "03" ]; then
+            for wf in refresh.yml watch.yml; do
+              gh api -X PUT "repos/${{ github.repository }}/actions/workflows/$wf/enable" && echo "re-enabled $wf"
+            done
           fi
         env:
           GH_TOKEN: ${{ github.token }}
