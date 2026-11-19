@@ -90,6 +90,12 @@ for (const c of contacts.slice(0, DETAIL_LIMIT)) {
     const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || c.contactName || 'lead';
     try {
       if (act.tag) await api(`/contacts/${c.id}/tags`, { method: 'POST', body: { tags: [act.tag] } });
+      // Any update from the dashboard means the owner has acted: stop the "owner has not answered" chase (WF6).
+      if ((c.tags || []).includes('waiting-owner')) {
+        await api(`/contacts/${c.id}/tags`, { method: 'DELETE', body: { tags: ['waiting-owner'] } });
+        await api(`/contacts/${c.id}/tags`, { method: 'POST', body: { tags: ['owner-answered'] } });
+        c.tags = c.tags.filter(t => t !== 'waiting-owner');
+      }
       if (act.stage && mainPipe) {
         const stage = mainPipe.stages.find(s => act.stage.test(s.name));
         if (stage) {
