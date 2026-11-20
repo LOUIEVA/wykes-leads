@@ -256,6 +256,31 @@ for (const [i, c] of contacts.entries()) {
     }
   }
   if (need) { cc.dStamp = stamp; cc.dAt = now; }
+
+  // Where the lead came in, in plain words
+  const tagsAll = (c.tags || []).map(t => String(t).toLowerCase());
+  const page = String((c.attributionSource && (c.attributionSource.url || c.attributionSource.referrer)) || (c.lastAttributionSource && c.lastAttributionSource.url) || '').toLowerCase();
+  const chat = tagsAll.includes('website-chat-lead');
+  lead.channel = /wykes-lp-artificial|artificial|grass/.test(page) ? (chat ? 'Grass page chat' : 'Grass landing page')
+    : /wykes-lp-fencing/.test(page) ? (chat ? 'Fencing page chat' : 'Fencing landing page')
+    : chat ? 'Website chat or voice'
+    : tagsAll.includes('website-lead') ? 'Website quote form'
+    : (lead.source || 'Other');
+  if (!lead.source || /^(direct traffic|crm ui)$/i.test(lead.source)) lead.source = lead.channel;
+
+  // Does a person need to step in? Each reason is a short plain sentence.
+  const stillOpen = !['won', 'lost', 'nurture'].includes(lead.bucket);
+  const why = [];
+  if (stillOpen) {
+    if (tagsAll.includes('needs-human')) why.push('The assistant handed this one to you');
+    if (lead.needsReply) why.push('Their last message has no reply');
+    if (lead.bucket === 'owner' || tagsAll.includes('waiting-owner')) why.push('Interested: pick a site visit day');
+    if ((lead.tasks || []).some(t => t.due && ts(t.due) < now)) why.push('A reminder is overdue');
+    const contacted = tagsAll.some(t => ['called', 'no-answer', 'owner-answered', 'quote-sent', 'site-visit-booked'].includes(t));
+    if (lead.bucket === 'new' && !contacted && ts(c.dateAdded) < now - DAY && ts(c.dateAdded) > now - 21 * DAY) why.push('No one has called them yet');
+  }
+  lead.why = why;
+  lead.isNew = ts(c.dateAdded) >= now - 2 * DAY;
   leads.push(lead);
 }
 
@@ -277,6 +302,8 @@ const kpis = {
   quotesOut: inB('quote').length, quotesValue: sum(inB('quote')),
   won30: won30.length, wonValue30: sum(won30), wonAll: inB('won').length,
   nurture: inB('nurture').length, lost: inB('lost').length, totalLeads: leads.length,
+  needsYou: leads.filter(l => l.why && l.why.length).length,
+  new48: leads.filter(l => l.isNew).length,
 };
 const dublinEndOfToday = startOfToday + DAY;
 const reminders = leads.flatMap(l => (l.tasks || []).map(t => ({ title: t.title, body: t.body, due: t.due, contactId: l.contactId, name: l.name, phone: l.phone })))
@@ -307,7 +334,7 @@ const sources = Object.entries(srcCount).map(([name, n]) => ({ name, count: n })
 
 const data = {
   generatedAt: new Date().toISOString(), hook: process.env.DASH_HOOK_URL || '', pipeline: mainPipe ? mainPipe.name : '', ghlBase: `https://app.gohighlevel.com/v2/location/${L}`,
-  kpis, reminders, visits, stages: stageCounts, weekly, sources, leads: leads.slice(0, 80),
+  kpis, reminders, visits, stages: stageCounts, weekly, sources, leads: leads.filter((l, i) => i < 80 || (l.why && l.why.length)),
 };
 
 // 7. Encrypt with the passcode (PBKDF2-SHA256 -> AES-256-GCM) and write the site

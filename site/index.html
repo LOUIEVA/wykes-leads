@@ -45,7 +45,15 @@
 
   /* KPI tiles */
   .kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: -2px; padding-top: 16px; }
-  @media (min-width: 760px) { .kpis { grid-template-columns: repeat(4, 1fr); gap: 14px; } }
+  @media (min-width: 760px) { .kpis { grid-template-columns: repeat(5, 1fr); gap: 14px; } }
+.why { background: var(--amber-soft); border: 1px solid #f2c38f; border-radius: 10px; padding: 9px 11px; font-size: 14px; color: #5a3a12; }
+.why b { color: var(--amber); }
+.needs-panel { border-color: #f2c38f; }
+.rem.stack { grid-template-columns: 1fr; }
+.rem.stack .due { text-align: left; white-space: normal; }
+.rem .t a { color: inherit; text-decoration: none; }
+.rem .t a:hover { text-decoration: underline; }
+.lead.jumped { box-shadow: 0 0 0 3px var(--amber) !important; transition: box-shadow .3s; }
   .kpi { background: var(--white); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 14px 12px; text-align: left; cursor: pointer; transition: border-color .15s, transform .15s; color: inherit; }
   .kpi { display: flex; flex-direction: column; justify-content: flex-start; }
   .kpi:hover { border-color: var(--green-2); }
@@ -152,7 +160,7 @@
     .layout { grid-template-columns: minmax(0, 1fr) 360px; grid-template-areas: "leads todo" "leads stats"; align-items: start; }
     .area-stats .bar-row { grid-template-columns: 120px 1fr 28px; }
   }
-  @media (min-width: 1700px) { .kpis { grid-template-columns: repeat(8, minmax(0, 1fr)) !important; } }
+  @media (min-width: 1700px) { .kpis { grid-template-columns: repeat(10, minmax(0, 1fr)) !important; } }
   @media (min-width: 760px) and (max-width: 1099px) { .area-todo { grid-template-columns: 1fr 1fr; } }
 
   /* Inside GoHighLevel (opened from the CRM menu): full width, light compact header */
@@ -281,6 +289,8 @@
 
     <div class="layout">
       <section class="area-todo" id="todo">
+        <div class="panel needs-panel" data-panel="needs"><h2>Needs you now</h2><div class="panel-body" id="needs"></div></div>
+        <div class="panel" data-panel="fresh"><h2>Just in (last 48 hours)</h2><div class="panel-body" id="fresh"></div></div>
         <div class="panel" data-panel="reminders"><h2>Reminders</h2><div class="panel-body" id="reminders"></div></div>
         <div class="panel" data-panel="visits"><h2>Upcoming site visits</h2><div class="panel-body" id="visits"></div></div>
       </section>
@@ -428,6 +438,7 @@
   function initials(n) { var p = String(n || '?').replace(/\(.*?\)/g, '').trim().split(/\s+/).filter(function (w) { return /[A-Za-z]/.test(w) && w !== 'TEST'; }); return ((p[0] || '?')[0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase(); }
   function attention(l) {
     var s = 0;
+    if (l.why && l.why.length) s += 120;
     if (l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost') s += 100;
     if (l.bucket === 'owner') s += 80;
     if ((l.tasks || []).some(function (t) { return t.due && new Date(t.due).getTime() < Date.now() + 864e5; })) s += 60;
@@ -449,7 +460,7 @@
   }
   function isOpen(l, total) {
     if (l.contactId in UI.open) return UI.open[l.contactId];
-    return total <= 2 || (l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost') || l.bucket === 'owner';
+    return total <= 2 || (l.why && l.why.length) || (l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost') || l.bucket === 'owner';
   }
   var sortable = null;
   function setupSortable() {
@@ -469,6 +480,8 @@
   var isB = function (x) { return function (l) { return l.bucket === x; }; };
   var FILTERS = [
     ['all', 'All', function () { return true; }],
+    ['needs', 'Needs you', function (l) { return l.why && l.why.length; }],
+    ['fresh', 'Just in', function (l) { return l.isNew; }],
     ['new', 'New', isB('new')],
     ['reply', 'Need a reply', function (l) { return l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost'; }],
     ['replied', 'Replied', function (l) { return l.replied; }],
@@ -482,6 +495,8 @@
 
   function renderKpis(k) {
     var tiles = [
+      ['needs', 'Needs you now', k.needsYou || 0, k.needsYou ? 'Leads waiting on a person' : 'Nothing waiting on you', k.needsYou ? 'alert' : 'good'],
+      ['fresh', 'Just in', k.new48 || 0, 'New in the last 48 hours', ''],
       ['new', 'New leads', k.new7, (k.newToday ? k.newToday + ' today · ' : '') + k.new30 + ' in 30 days', ''],
       ['reply', 'Need a reply', k.needsReply, 'Their message is the last one', k.needsReply ? 'alert' : ''],
       ['replied', 'Replied', k.replied30, 'Leads who wrote back, 30 days', ''],
@@ -535,10 +550,12 @@
       var flags = [], needs = l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost';
       if (needs) flags.push('<span class="tag warn">Needs a reply</span>');
       else if (l.replied) flags.push('<span class="tag grey">Replied</span>');
-      var headTags = stageTag(l) + (needs ? '<span class="tag warn">Needs a reply</span>' : '');
+      var headTags = stageTag(l) + (needs ? '<span class="tag warn">Needs a reply</span>' : '') +
+        ((l.why && l.why.length && !needs) ? '<span class="tag warn">Needs you</span>' : '');
+      var whyBlock = l.why && l.why.length ? '<div class="why"><b>Needs you:</b> ' + l.why.map(esc).join(' · ') + '</div>' : '';
       var msg = l.lastMessage && l.lastMessage.text ? '<div class="msg"><b>' + (l.lastMessage.dir === 'inbound' ? esc(l.name.split(' ')[0]) : 'You') + ' (' + esc(ago(l.lastMessage.at)) + '):</b> ' + esc(l.lastMessage.text) + '</div>' : (l.message ? '<div class="msg"><b>Their job:</b> ' + esc(l.message) + '</div>' : '');
       var open = isOpen(l, total);
-      var sub = [l.service, l.town, ago(l.createdAt)].filter(Boolean).map(esc).join('<span class="dot">·</span>');
+      var sub = [l.service, l.town, l.channel, ago(l.createdAt)].filter(Boolean).map(esc).join('<span class="dot">·</span>');
       return '<article class="lead b-' + esc(l.bucket || 'new') + (needs ? ' flag' : '') + (open ? ' open' : '') + '" data-cid="' + esc(l.contactId) + '">' +
         '<div class="lead-head" role="button" tabindex="0" aria-expanded="' + open + '" data-toggle>' +
           '<span class="handle" title="Drag to move" aria-label="Drag to move this lead">' + ICON.grip + '</span>' +
@@ -551,7 +568,7 @@
         '<div class="lh-tags" data-toggle>' + headTags + (l.value ? '<span class="tag value">' + euro(l.value) + '</span>' : '') + '</div>' +
         '<div class="lead-body"><div class="lead-inner"><div class="lead-content">' +
           details +
-          '<div class="tags">' + stageTag(l) + flags.join('') + (l.ballpark ? '<span class="tag grey">' + esc(l.ballpark) + '</span>' : '') + '</div>' + pendingLine(l) + msg + extra + updateForm(l) +
+          '<div class="tags">' + stageTag(l) + flags.join('') + (l.ballpark ? '<span class="tag grey">' + esc(l.ballpark) + '</span>' : '') + '</div>' + whyBlock + pendingLine(l) + msg + extra + updateForm(l) +
           '<div class="actions">' +
             (tel ? '<a class="btn" href="tel:' + esc(tel) + '">Call</a><a class="btn ghost" href="https://wa.me/' + esc(wa) + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
             (l.email && !tel ? '<a class="btn" href="mailto:' + esc(l.email) + '">Email</a>' : '') +
@@ -580,6 +597,16 @@
   function renderTodo(d) {
     var crm = function (id) { return esc(d.ghlBase + '/contacts/detail/' + id); };
     var r = d.reminders || [], v = d.visits || [];
+    var callLink = function (l) { var tel = (l.phone || '').replace(/[^\d+]/g, ''); return tel ? ' · <a href="tel:' + esc(tel) + '">Call</a>' : ''; };
+    var go = function (l) { return '<a href="#" data-jump="' + esc(l.contactId) + '">' + esc(l.name) + '</a>'; };
+    var needs = d.leads.filter(function (l) { return l.why && l.why.length; }).sort(function (a, b) { return attention(b) - attention(a) || new Date(b.createdAt) - new Date(a.createdAt); });
+    $('needs').innerHTML = needs.length ? needs.slice(0, 8).map(function (l) {
+      return '<div class="rem stack"><span class="t">' + go(l) + '</span><span class="due over">' + l.why.map(esc).join('<br>') + '</span><span class="who">' + esc([l.service, l.town, l.channel].filter(Boolean).join(' · ')) + callLink(l) + ' · <a href="' + crm(l.contactId) + '" target="_blank" rel="noopener">CRM</a></span></div>';
+    }).join('') + (needs.length > 8 ? '<p class="muted">+' + (needs.length - 8) + ' more. Tap "Needs you" below.</p>' : '') : '<p class="muted">Nothing needs you right now. The assistant is handling the rest.</p>';
+    var fresh = d.leads.filter(function (l) { return l.isNew; }).sort(function (a, b) { return new Date(b.createdAt) - new Date(a.createdAt); });
+    $('fresh').innerHTML = fresh.length ? fresh.slice(0, 8).map(function (l) {
+      return '<div class="rem"><span class="t">' + go(l) + '</span><span class="due today">' + esc(ago(l.createdAt)) + '</span><span class="who">' + esc([l.channel, l.service, l.town].filter(Boolean).join(' · ')) + callLink(l) + '</span></div>';
+    }).join('') : '<p class="muted">No new leads in the last 48 hours.</p>';
     $('reminders').innerHTML = r.length ? r.slice(0, 8).map(function (t) {
       var dl = dueLabel(t.due);
       return '<div class="rem"><span class="t">' + esc(t.title) + '</span><span class="due ' + dl[1] + '">' + esc(dl[0]) + '</span><span class="who"><a href="' + crm(t.contactId) + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>' + (t.body ? ' · ' + esc(t.body) : '') + '</span></div>';
@@ -594,6 +621,7 @@
     var h = Number(new Date().toLocaleString('en-IE', { hour: 'numeric', hour12: false, timeZone: 'Europe/Dublin' }));
     $('greeting').textContent = EMBED ? 'Your leads' : (h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening') + '. Here are your leads.';
     var bits = [];
+    if (k.needsYou) bits.push(k.needsYou + (k.needsYou === 1 ? ' lead needs' : ' leads need') + ' you now');
     bits.push(k.new7 + (k.new7 === 1 ? ' new lead' : ' new leads') + ' this week');
     if (k.needsReply) bits.push(k.needsReply + ' waiting for a reply');
     if (k.remindersOverdue) bits.push(k.remindersOverdue + (k.remindersOverdue === 1 ? ' reminder' : ' reminders') + ' overdue');
@@ -688,6 +716,16 @@
   });
   $('lockForm').addEventListener('submit', function (e) { e.preventDefault(); open($('code').value); });
   document.addEventListener('click', function (e) { var b = e.target.closest('[data-f]'); if (b) setFilter(b.getAttribute('data-f')); });
+  // "Needs you now" and "Just in" names jump to the full lead card and open it.
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest('[data-jump]'); if (!a) return;
+    e.preventDefault();
+    var id = a.getAttribute('data-jump');
+    if (!document.querySelector('.lead[data-cid="' + id + '"]')) { $('q').value = ''; setFilter('all'); }
+    var card = document.querySelector('.lead[data-cid="' + id + '"]'); if (!card) return;
+    toggleLead(card, true); card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    card.classList.add('jumped'); setTimeout(function () { card.classList.remove('jumped'); }, 2200);
+  });
   $('lockBtn').addEventListener('click', function () { store.clear(); state.data = null; $('code').value = ''; $('app').hidden = true; $('lock').hidden = false; });
   setInterval(function () {
     if (!state.code || document.hidden) return;
