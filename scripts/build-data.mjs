@@ -272,7 +272,7 @@ for (const [i, c] of contacts.entries()) {
   const stillOpen = !['won', 'lost', 'nurture'].includes(lead.bucket);
   const why = [];
   if (stillOpen) {
-    if (tagsAll.includes('needs-human')) why.push('The assistant handed this one to you');
+    if (tagsAll.includes('needs-human') || tagsAll.includes('human handover')) why.push('The assistant handed this one to you');
     if (lead.needsReply) why.push('Their last message has no reply');
     if (lead.bucket === 'owner' || tagsAll.includes('waiting-owner')) why.push('Interested: pick a site visit day');
     if ((lead.tasks || []).some(t => t.due && ts(t.due) < now)) why.push('A reminder is overdue');
