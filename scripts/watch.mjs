@@ -3,7 +3,8 @@
 // GitHub's own cron schedule often skips runs for hours.
 //
 // API budget: the sub-account key allows 10,000 GoHighLevel calls a day, shared with the
-// refresh job. This watcher uses 5 calls every 3 minutes (about 2,400 a day).
+// refresh job. This watcher uses 5 calls every 3 minutes (about 2,400 a day), and slows to every 15 minutes
+// once fewer than 2,500 calls are left. Refreshes start at most every 5 minutes.
 import { writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 
@@ -12,12 +13,14 @@ const GH = process.env.GH_TOKEN, REPO = process.env.REPO;
 const MINUTES = Number(process.env.WATCH_MINUTES || 340);   // stay under the 6h job limit
 const EVERY_S = 180;                                         // how often to look at GHL
 const NOTE_CONTACTS = 2;                                     // dashboard updates arrive as notes on these
-const MIN_GAP_S = 120;                                       // never start refreshes closer than this
+const MIN_GAP_S = 300;                                       // never start refreshes closer than this
 if (!PIT || !L || !GH || !REPO) { console.error('Missing GHL_PIT, GHL_LOCATION_ID, GH_TOKEN or REPO'); process.exit(1); }
 
 const BASE = 'https://services.leadconnectorhq.com';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 class DailyCap extends Error { constructor(ms) { super('daily API limit reached'); this.resetMs = ms; } }
+let dailyLeft = Infinity;                                    // calls GHL says are left today
+const LOW = 2500, SLOW_EVERY_S = 900;                        // under 2,500 left: look every 15 min instead
 async function ghl(path, { body, version = '2021-07-28' } = {}) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const r = await fetch(BASE + path, {
@@ -25,6 +28,8 @@ async function ghl(path, { body, version = '2021-07-28' } = {}) {
       headers: { Authorization: `Bearer ${PIT}`, Version: version, Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 wykes-leads-watcher' },
       body: body ? JSON.stringify(body) : undefined,
     });
+    const left = r.headers.get('x-ratelimit-daily-remaining');
+    if (left !== null && left !== '') dailyLeft = Number(left);
     if (r.status === 429 && r.headers.get('x-ratelimit-daily-remaining') === '0') throw new DailyCap(Number(r.headers.get('x-ratelimit-daily-reset') || 0));
     if (r.status === 429 || r.status >= 500) { await sleep(5000 * (attempt + 1)); continue; }
     if (!r.ok) throw new Error(`${path} -> ${r.status}`);
@@ -72,6 +77,10 @@ while (Date.now() - started < MINUTES * 60_000) {
       if (await startRefresh('change in GHL')) lastRefresh = Date.now();
     }
     if (!last || gapOk) last = fp;   // a change inside the gap is picked up next round
+    if (dailyLeft < LOW) {
+      wait = SLOW_EVERY_S * 1000;
+      console.log(new Date().toISOString(), `only ${dailyLeft} GHL calls left today, checking every ${SLOW_EVERY_S / 60} min`);
+    }
   } catch (e) {
     if (e instanceof DailyCap) {
       const left = MINUTES * 60_000 - (Date.now() - started);

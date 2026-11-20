@@ -30,7 +30,19 @@ if (!PIT || !L || !PASS) { console.error('Missing GHL_PIT, GHL_LOCATION_ID or DA
 
 const API = 'https://services.leadconnectorhq.com';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-let calls = 0;
+let calls = 0, dailyLeft = Infinity, budgetChecked = false;
+// Keep this many calls of the 10,000 a day in reserve: once fewer are left, refreshes stop
+// until the daily reset so the cap is never hit (the watcher slows down at the same point).
+const RESERVE = Number(process.env.API_RESERVE || 800);
+async function stopForToday(resetMs, why) {
+  const h = Math.round(Number(resetMs || 0) / 36e5 * 10) / 10;
+  console.log(`${why} (resets in about ${h} h). Keeping the last published leads.`);
+  await saveCache();
+  // If the page itself changed (new commit), still publish it with the last published lead data.
+  const pageOnly = await publishPageOnly().catch(e => { console.warn('page-only publish failed:', e.message); return false; });
+  if (!pageOnly && process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, 'skip=true\n');
+  process.exit(0);
+}
 async function api(path, { method = 'GET', body, version = '2021-07-28' } = {}) {
   for (let attempt = 0; attempt < 5; attempt++) {
     calls++;
@@ -38,14 +50,12 @@ async function api(path, { method = 'GET', body, version = '2021-07-28' } = {}) 
       method, body: body ? JSON.stringify(body) : undefined,
       headers: { Authorization: `Bearer ${PIT}`, Version: version, Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible; WykesLeadsDashboard/1.0)' },
     });
-    if (res.status === 429 && res.headers.get('x-ratelimit-daily-remaining') === '0') {
-      const h = Math.round(Number(res.headers.get('x-ratelimit-daily-reset') || 0) / 36e5 * 10) / 10;
-      console.log(`GoHighLevel daily API limit reached (resets in about ${h} h). Keeping the last published leads.`);
-      await saveCache();
-      // If the page itself changed (new commit), still publish it with the last published lead data.
-      const pageOnly = await publishPageOnly().catch(e => { console.warn('page-only publish failed:', e.message); return false; });
-      if (!pageOnly && process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, 'skip=true\n');
-      process.exit(0);
+    const left = res.headers.get('x-ratelimit-daily-remaining');
+    if (left !== null && left !== '') dailyLeft = Number(left);
+    if (res.status === 429 && left === '0') await stopForToday(res.headers.get('x-ratelimit-daily-reset'), 'GoHighLevel daily API limit reached');
+    if (!budgetChecked && Number.isFinite(dailyLeft)) {
+      budgetChecked = true;
+      if (dailyLeft < RESERVE) await stopForToday(res.headers.get('x-ratelimit-daily-reset'), `Only ${dailyLeft} GoHighLevel API calls left today, saving them`);
     }
     if (res.status === 429 || res.status >= 500) { await sleep(1500 * (attempt + 1)); continue; }
     if (!res.ok) throw new Error(`${method} ${path.split('?')[0]} -> ${res.status} ${(await res.text()).slice(0, 160)}`);
@@ -127,7 +137,7 @@ const deleted = new Set();
 let applied = 0, notesFetched = 0;
 // Notes are re-read only for leads that changed, plus the few most recently updated ones
 // (dashboard updates arrive as notes and may not change the contact's update time).
-const recentlyUpdated = new Set(contacts.slice().sort((a, b) => ts(b.dateUpdated) - ts(a.dateUpdated)).slice(0, 8).map(c => c.id));
+const recentlyUpdated = new Set(contacts.slice().sort((a, b) => ts(b.dateUpdated) - ts(a.dateUpdated)).slice(0, 4).map(c => c.id));
 for (const c of contacts.slice(0, DETAIL_LIMIT)) {
   const cc = cache[c.id] || (cache[c.id] = {});
   let notes = cc.notes || [];
@@ -216,7 +226,7 @@ function bucketOf(o) {
 
 // 5. Build each lead
 const leads = [];
-let staleBudget = 6, detailsFetched = 0;   // also re-check up to 6 unchanged leads a run whose details are over 6 h old
+let staleBudget = 2, detailsFetched = 0;   // also re-check up to 2 unchanged leads a run whose details are over 6 h old
 for (const [i, c] of contacts.entries()) {
   if (deleted.has(c.id)) continue;
   const o = oppByContact[c.id], conv = convByContact[c.id], si = o ? stageInfo[o.pipelineStageId] || {} : {};
