@@ -100,7 +100,8 @@ for (let page = 1; page <= 20; page++) {
   contacts.push(...(r.contacts || []));
   if ((r.contacts || []).length < 100) break;
 }
-const internal = c => (c.tags || []).some(t => /^(owner|internal|test)$/i.test(t)) || /internal|not a lead/i.test(c.source || '');
+// Not leads: the owner, internal/test contacts, and suppliers / job seekers / sales pitches the AI tagged not-a-lead
+const internal = c => (c.tags || []).some(t => /^(owner|internal|test|not-a-lead)$/i.test(t)) || /internal|not a lead/i.test(c.source || '');
 contacts = contacts.filter(c => !internal(c));
 contacts.sort((a, b) => ts(b.dateAdded) - ts(a.dateAdded));
 
@@ -226,7 +227,7 @@ function bucketOf(o) {
 
 // 5. Build each lead
 const leads = [];
-let staleBudget = 2, detailsFetched = 0;   // also re-check up to 2 unchanged leads a run whose details are over 6 h old
+let staleBudget = 2, detailsFetched = 0, svcTagBudget = 10, svcTagsAdded = 0;   // also re-check up to 2 unchanged leads a run whose details are over 6 h old
 for (const [i, c] of contacts.entries()) {
   if (deleted.has(c.id)) continue;
   const o = oppByContact[c.id], conv = convByContact[c.id], si = o ? stageInfo[o.pipelineStageId] || {} : {};
@@ -307,6 +308,26 @@ for (const [i, c] of contacts.entries()) {
     : (lead.source || 'Other');
   if (!lead.source || /^(direct traffic|crm ui)$/i.test(lead.source)) lead.source = lead.channel;
 
+  // Service tags (service-fencing, service-artificial-grass, ...) from what they asked for and the page they came from.
+  // Added once per lead, in one API call, so contacts can be filtered by service in GHL.
+  const svcText = `${f.service_requested || ''} ${f.job_message || ''} ${lead.channel}`.toLowerCase();
+  const svcTags = [
+    [/grass/, 'service-artificial-grass'],
+    [/resin|driveway/, 'service-resin-driveway'],
+    [/paving|patio|block pav|groundwork|drainage/, 'service-paving'],
+    [/palisade|rigid mesh|security|commercial|stock fenc|school|farm/, 'service-commercial-fencing'],
+    [/material|shop|supply only|post 10|collection/, 'service-materials'],
+    [/fenc|timber|composite|concrete|pvc|featheredge|slatted|panel|gate/, 'service-fencing'],
+  ].filter(([re]) => re.test(svcText)).map(([, t]) => t).slice(0, 3);
+  const missingSvc = svcTags.filter(t => !tagsAll.includes(t));
+  if (i < DETAIL_LIMIT && missingSvc.length && svcTagBudget > 0 && cc.svcTagged !== missingSvc.join(',')) {
+    svcTagBudget--;
+    try { await api(`/contacts/${c.id}/tags`, { method: 'POST', body: { tags: missingSvc } }); tagsAll.push(...missingSvc); svcTagsAdded++; }
+    catch (e) { console.warn('service tag', e.message); }
+    cc.svcTagged = missingSvc.join(',');
+  }
+  lead.services = svcTags.map(t => t.replace('service-', '').replace(/-/g, ' '));
+
   // Qualification in three plain groups:
   //   qualified  = handed to the owner (interested, visit booked, quoted or won)
   //   qualifying = still being qualified (new enquiry or the AI is talking to them)
@@ -323,7 +344,18 @@ for (const [i, c] of contacts.entries()) {
   const stillOpen = !['won', 'lost', 'nurture'].includes(lead.bucket);
   const why = [];
   if (stillOpen) {
-    if (tagsAll.includes('needs-human') || tagsAll.includes('human handover')) why.push('The assistant handed this one to you');
+    // Why the AI handed over, from the reason tag it added (chat handover / stop-bot scenarios, voice post-call routing)
+    const REASONS = {
+      'enquiry-complaint': 'Complaint about a job: call them first',
+      'enquiry-call-request': 'Asked for a call',
+      'enquiry-price-date': 'Asked for a fixed price, a discount or a date',
+      'enquiry-outside-area': 'Outside the usual area: check if you can cover it',
+      'enquiry-shop': 'Shop order question',
+      'enquiry-question': 'Asked something the assistant could not answer',
+    };
+    const reasons = Object.keys(REASONS).filter(t => tagsAll.includes(t)).map(t => REASONS[t]);
+    if (reasons.length) why.push(...reasons);
+    else if (tagsAll.includes('needs-human') || tagsAll.includes('human handover')) why.push('The assistant handed this one to you');
     if (lead.needsReply) why.push('Their last message has no reply');
     if (lead.bucket === 'owner' || tagsAll.includes('waiting-owner')) why.push('Interested: pick a site visit day');
     if ((lead.tasks || []).some(t => t.due && ts(t.due) < now)) why.push('A reminder is overdue');
@@ -407,6 +439,7 @@ const BUILD = (process.env.GITHUB_SHA || 'local').slice(0, 12);
 await writeFile(`${OUT}/index.html`, (await readFile(`${OUT}/index.html`, 'utf8')).replace('__BUILD__', BUILD));
 await writeFile(`${OUT}/data.enc.json`, JSON.stringify({ v: 1, iter: ITER, salt: b64(salt), iv: b64(iv), ct: b64(ct), at: data.generatedAt, build: BUILD }));
 await saveCache();
+if (svcTagsAdded) console.log(`Added service tags to ${svcTagsAdded} lead(s)`);
 console.log(`Re-read notes for ${notesFetched} and details for ${detailsFetched} lead(s); the rest came from the cache.`);
 console.log(`OK: ${leads.length} leads (contacts), ${opps.length} deals in ${pipelines.length} pipelines, ${Object.keys(convByContact).length} conversations, ${reminders.length} open reminders, ${leads.reduce((n, l) => n + (l.noteCount || 0), 0)} notes, ${visits.length} upcoming visits, ${calls} API calls`);
 console.log('KPIs', JSON.stringify(kpis));
