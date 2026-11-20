@@ -252,6 +252,14 @@
   footer { margin: 34px 0 40px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
   .linkbtn { background: none; border: 0; color: var(--green); font-weight: 600; cursor: pointer; padding: 8px 0; text-decoration: underline; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .btn.danger { background: var(--white); color: #b3261e; border: 1px solid #e7b4ae; }
+  .btn.danger:hover { background: #fbeceb; }
+  .btn.danger.armed { background: #b3261e; color: #fff; border-color: #b3261e; }
+  .tag.q-yes { background: #dff0e3; color: #1f6a35; font-weight: 700; }
+  .tag.q-mid { background: #fdf0dd; color: #8a5a12; font-weight: 700; }
+  .tag.q-no { background: #ece9e2; color: #6b6b6b; font-weight: 700; }
+  .linkbtn.refresh { color: inherit; text-decoration: underline; font: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  .toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--forest); color: #fff; padding: 12px 18px; border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.25); z-index: 50; max-width: calc(100% - 32px); font-size: 15px; }
 </style>
 <script src="vendor/Sortable.min.js" defer></script>
 </head>
@@ -274,12 +282,12 @@
     <div class="wrap">
       <div class="top">
         <img src="https://files.leadconnectorhq.com/file/6afc14b277a01e4622490903/wykes-logo-white.webp" alt="Wykes Contracts">
-        <div class="updated">Updated <b id="ago">just now</b><br>Refreshes every 5 min</div>
+        <div class="updated">Updated <b id="ago">just now</b><br>Checks every minute &middot; <button type="button" class="linkbtn refresh" data-refresh>Refresh</button></div>
       </div>
       <div class="hello">
         <h1 id="greeting">Your leads</h1>
         <p id="summary"></p>
-        <span class="embed-updated">Updated <b id="ago2">just now</b> · refreshes every 5 min</span>
+        <span class="embed-updated">Updated <b id="ago2">just now</b> · checks every minute &middot; <button type="button" class="linkbtn refresh" data-refresh>Refresh</button></span>
       </div>
     </div>
   </header>
@@ -335,6 +343,7 @@
   </main>
 </div>
 
+<div class="toast" id="toast" role="status" hidden></div>
 <script>
 (function () {
   var EMBED = (function () { try { return window.self !== window.top; } catch (e) { return true; } })();
@@ -395,11 +404,34 @@
     var where = l.pipeline && l.pipeline !== (state.data && state.data.pipeline) ? '<span class="tag grey">' + esc(l.pipeline) + '</span>' : '';
     return '<span class="tag' + cls + '">' + esc(text) + '</span>' + where;
   }
+  // Qualification in three plain groups (the build script sets l.qual; older data falls back to the stage)
+  function qualOf(l) {
+    if (l.qual) return l.qual;
+    return ['owner', 'booked', 'quote', 'won'].indexOf(l.bucket) !== -1 ? 'qualified' : (l.bucket === 'nurture' || l.bucket === 'lost') ? 'not' : 'qualifying';
+  }
+  function qualTag(l) {
+    if (l.bucket === 'won') return '';
+    var q = qualOf(l);
+    if (q === 'qualified') return '<span class="tag q-yes">Qualified</span>';
+    if (q === 'not') return '<span class="tag q-no">' + (l.bucket === 'nurture' ? 'Shopping around' : 'Not qualified') + '</span>';
+    return '<span class="tag q-mid">Being qualified</span>';
+  }
   var STATUS = [
-    ['note', 'No change, just add a note'], ['called', 'Called'], ['no_answer', 'No answer'], ['qualified', 'Qualified'],
-    ['not_qualified', 'Not qualified'], ['visit_booked', 'Site visit booked'], ['quote_sent', 'Quote sent'],
+    ['note', 'No change, just add a note'], ['called', 'Called'], ['no_answer', 'No answer'],
+    ['qualified', 'Qualified (interested)'], ['shopping', 'Shopping around / not ready'], ['not_qualified', 'Not qualified'],
+    ['visit_booked', 'Site visit booked'], ['quote_sent', 'Quote sent'],
     ['won', 'Won (job closed)'], ['lost', 'Lost (closed)']
   ];
+  // What a saved status means straight away, before the CRM catches up
+  var KEYMAP = {
+    qualified: { qual: 'qualified', bucket: 'owner' }, visit_booked: { qual: 'qualified', bucket: 'booked' },
+    quote_sent: { qual: 'qualified', bucket: 'quote' }, won: { qual: 'qualified', bucket: 'won' },
+    not_qualified: { qual: 'not', bucket: 'lost' }, lost: { qual: 'not', bucket: 'lost' }, shopping: { qual: 'not', bucket: 'nurture' }
+  };
+  var DKEY = 'wykesLeadsDeleted';
+  var gone = (function () { try { return JSON.parse(localStorage.getItem(DKEY) || '{}'); } catch (e) { return {}; } })();
+  function saveGone() { try { localStorage.setItem(DKEY, JSON.stringify(gone)); } catch (e) {} }
+  var tt; function toast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.hidden = false; clearTimeout(tt); tt = setTimeout(function () { t.hidden = true; }, 5000); }
   var PKEY = 'wykesLeadsPending';
   var pending = (function () { try { return JSON.parse(localStorage.getItem(PKEY) || '{}'); } catch (e) { return {}; } })();
   function savePending() { try { localStorage.setItem(PKEY, JSON.stringify(pending)); } catch (e) {} }
@@ -425,6 +457,19 @@
       if (done || Date.now() - p.at > 45 * 60000) { delete pending[cid]; changed = true; }
     });
     if (changed) savePending();
+  }
+  function prep(d) {
+    if (!d) return d;
+    var ids = {}; d.leads.forEach(function (l) { ids[l.contactId] = 1; });
+    Object.keys(gone).forEach(function (cid) { if (!ids[cid] || Date.now() - gone[cid].at > 3 * 864e5) delete gone[cid]; });
+    saveGone();
+    d.leads = d.leads.filter(function (l) { return !gone[l.contactId]; });
+    d.leads.forEach(function (l) {
+      var p = pending[l.contactId], m = p && KEYMAP[p.key];
+      if (m) { l.qual = m.qual; l.bucket = m.bucket; }
+      if (p && p.key && p.key !== 'note') l.why = (l.why || []).filter(function (w) { return !/24 hours/.test(w) && !(m && m.bucket !== 'owner' && /site visit day/.test(w)); });
+    });
+    return d;
   }
   function busy() { return [].some.call(document.querySelectorAll('.upd[open] textarea, .upd[open] select'), function (el) { return el.value; }); }
   var UKEY = 'wykesLeadsUI';
@@ -482,10 +527,10 @@
     ['all', 'All', function () { return true; }],
     ['needs', 'Needs you', function (l) { return l.why && l.why.length; }],
     ['fresh', 'Just in', function (l) { return l.isNew; }],
-    ['new', 'New', isB('new')],
+    ['qualified', 'Qualified', function (l) { return qualOf(l) === 'qualified' && l.bucket !== 'won'; }],
+    ['qualifying', 'Being qualified', function (l) { return qualOf(l) === 'qualifying'; }],
+    ['notq', 'Not qualified / shopping', function (l) { return qualOf(l) === 'not'; }],
     ['reply', 'Need a reply', function (l) { return l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost'; }],
-    ['replied', 'Replied', function (l) { return l.replied; }],
-    ['owner', 'Waiting on you', isB('owner')],
     ['booked', 'Visit booked', isB('booked')],
     ['quote', 'Quote sent', isB('quote')],
     ['won', 'Won', isB('won')],
@@ -494,17 +539,30 @@
   var fn = function (id) { return (FILTERS.find(function (f) { return f[0] === id; }) || FILTERS[0])[2]; };
 
   function renderKpis(k) {
+    var adj = { qualified: 0, qualifying: 0, not: 0 };
+    Object.keys(pending).forEach(function (cid) {
+      var p = pending[cid], m = KEYMAP[p.key]; if (!m || !p.from) return;
+      var to = m.bucket === 'won' ? null : m.qual;
+      if (p.from !== to) { adj[p.from] = (adj[p.from] || 0) - 1; if (to) adj[to]++; }
+    });
+    Object.keys(gone).forEach(function (cid) { var q = gone[cid].qual; if (q) adj[q] = (adj[q] || 0) - 1; });
+    var hasQ = k.qualified !== undefined, L = state.data.leads;
+    var cnt = function (q) { return L.filter(function (l) { return qualOf(l) === q && (q !== 'qualified' || l.bucket !== 'won'); }).length; };
+    var nQ = Math.max(0, hasQ ? k.qualified + adj.qualified : cnt('qualified'));
+    var nQi = Math.max(0, hasQ ? k.qualifying + adj.qualifying : cnt('qualifying'));
+    var nN = Math.max(0, hasQ ? k.notQualified + adj.not : cnt('not'));
+    var needsN = L.filter(function (l) { return l.why && l.why.length; }).length;
     var tiles = [
-      ['needs', 'Needs you now', k.needsYou || 0, k.needsYou ? 'Leads waiting on a person' : 'Nothing waiting on you', k.needsYou ? 'alert' : 'good'],
+      ['needs', 'Needs you now', needsN, needsN ? 'Leads waiting on a person' : 'Nothing waiting on you', needsN ? 'alert' : 'good'],
       ['fresh', 'Just in', k.new48 || 0, 'New in the last 48 hours', ''],
-      ['new', 'New leads', k.new7, (k.newToday ? k.newToday + ' today · ' : '') + k.new30 + ' in 30 days', ''],
+      ['qualified', 'Qualified', nQ, 'Interested, booked or quoted', nQ ? 'good' : ''],
+      ['qualifying', 'Being qualified', nQi, 'New, or talking to the assistant', ''],
+      ['notq', 'Not qualified', nN, 'Shopping around, not ready or lost', ''],
       ['reply', 'Need a reply', k.needsReply, 'Their message is the last one', k.needsReply ? 'alert' : ''],
-      ['replied', 'Replied', k.replied30, 'Leads who wrote back, 30 days', ''],
-      ['owner', 'Waiting on you', k.sentToOwner, 'Pick a day for the site visit', k.sentToOwner ? 'alert' : ''],
       ['booked', 'Site visits booked', k.visitsBooked, 'Booked, not yet quoted', ''],
       ['quote', 'Quotes out', k.quotesOut, euro(k.quotesValue) + ' waiting', ''],
       ['won', 'Won', k.won30, euro(k.wonValue30) + ' in 30 days', 'good'],
-      ['tasks', 'Reminders due', (k.remindersOverdue || 0) + (k.remindersToday || 0), (k.remindersOpen || 0) + ' open · ' + (k.remindersOverdue || 0) + ' overdue', k.remindersOverdue ? 'alert' : '']
+      ['tasks', 'Reminders due', (k.remindersOverdue || 0) + (k.remindersToday || 0), (k.remindersOpen || 0) + ' open, ' + (k.remindersOverdue || 0) + ' overdue', k.remindersOverdue ? 'alert' : '']
     ];
     $('kpis').innerHTML = tiles.map(function (t) {
       return '<button type="button" class="kpi ' + t[4] + (state.filter === t[0] ? ' active' : '') + '" data-f="' + t[0] + '"><div class="label">' + t[1] + '</div><div class="num">' + t[2] + '</div><div class="sub">' + esc(t[3]) + '</div></button>';
@@ -550,7 +608,7 @@
       var flags = [], needs = l.needsReply && l.bucket !== 'won' && l.bucket !== 'lost';
       if (needs) flags.push('<span class="tag warn">Needs a reply</span>');
       else if (l.replied) flags.push('<span class="tag grey">Replied</span>');
-      var headTags = stageTag(l) + (needs ? '<span class="tag warn">Needs a reply</span>' : '') +
+      var headTags = qualTag(l) + stageTag(l) + (needs ? '<span class="tag warn">Needs a reply</span>' : '') +
         ((l.why && l.why.length && !needs) ? '<span class="tag warn">Needs you</span>' : '');
       var whyBlock = l.why && l.why.length ? '<div class="why"><b>Needs you:</b> ' + l.why.map(esc).join(' · ') + '</div>' : '';
       var msg = l.lastMessage && l.lastMessage.text ? '<div class="msg"><b>' + (l.lastMessage.dir === 'inbound' ? esc(l.name.split(' ')[0]) : 'You') + ' (' + esc(ago(l.lastMessage.at)) + '):</b> ' + esc(l.lastMessage.text) + '</div>' : (l.message ? '<div class="msg"><b>Their job:</b> ' + esc(l.message) + '</div>' : '');
@@ -574,6 +632,7 @@
             (l.email && !tel ? '<a class="btn" href="mailto:' + esc(l.email) + '">Email</a>' : '') +
             (l.bucket !== 'won' && l.bucket !== 'lost' ? '<button type="button" class="btn ghost" data-book="' + esc(l.contactId) + '">Book site visit</button>' : '') +
             '<a class="btn ghost" href="' + esc(d.ghlBase + '/contacts/detail/' + l.contactId) + '" target="_blank" rel="noopener">Open in CRM</a>' +
+            '<button type="button" class="btn danger" data-del="' + esc(l.contactId) + '" title="Delete this lead from the CRM">Delete</button>' +
           '</div>' +
         '</div></div></div></article>';
     }).join('');
@@ -635,7 +694,7 @@
   async function open(code, silent) {
     $('openBtn').disabled = true; $('err').textContent = silent ? '' : 'Opening...';
     try {
-      state.data = await load(code); state.code = code; store.set(code);
+      state.data = prep(await load(code)); state.code = code; store.set(code);
       $('lock').hidden = true; $('app').hidden = false; $('err').textContent = ''; clearDonePending(state.data); render();
     } catch (e) {
       $('err').textContent = e.message === 'fetch' ? 'Could not reach the dashboard. Check your signal and try again.' : 'That passcode did not work. Check it and try again.';
@@ -707,12 +766,42 @@
       var res = await fetch(state.data.hook, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contact_id: f.getAttribute('data-cid'), status_key: key, outcome: label, note: body, remind_at: remindIso, visit_at: visitIso, source: 'Wykes leads dashboard', sent_at: new Date().toISOString() }) });
       if (!res.ok) throw new Error(res.status);
-      pending[f.getAttribute('data-cid')] = { label: label, note: !!text, at: Date.now() }; savePending();
+      var cidS = f.getAttribute('data-cid'), was = state.data.leads.find(function (x) { return x.contactId === cidS; });
+      pending[cidS] = { label: label, note: !!text, at: Date.now(), key: key, from: was ? qualOf(was) : '' }; savePending(); prep(state.data);
       line.className = 'msgline ok'; line.textContent = 'Saved. The note is in the CRM now; the stage updates within a few minutes.';
       f.reset(); f.querySelector('.visit-field').hidden = true; setTimeout(function () { var dt = f.closest('details'); if (dt) dt.open = false; render(); }, 1800);
     } catch (err) {
       line.className = 'msgline bad'; line.textContent = 'Could not save. Check your signal and try again.';
     } finally { btn.disabled = false; }
+  });
+  // Delete: tap once to arm, tap again within 4 seconds to delete. The lead disappears straight away.
+  document.addEventListener('click', async function (e) {
+    var b = e.target.closest('[data-del]'); if (!b || b.disabled) return;
+    var cid = b.getAttribute('data-del'), l = state.data.leads.find(function (x) { return x.contactId === cid; }); if (!l) return;
+    if (!b.classList.contains('armed')) {
+      b.classList.add('armed'); b.textContent = 'Tap again to delete';
+      setTimeout(function () { if (b.isConnected && !b.disabled) { b.classList.remove('armed'); b.textContent = 'Delete'; } }, 4000);
+      return;
+    }
+    if (!state.data.hook) { toast('Deleting is not switched on yet. Ask Louie.'); return; }
+    b.disabled = true; b.textContent = 'Deleting...';
+    try {
+      var res = await fetch(state.data.hook, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contact_id: cid, status_key: 'delete', outcome: 'Delete this lead', note: '[Dashboard] Delete this lead | #s=delete;r=;v=', remind_at: '', visit_at: '', source: 'Wykes leads dashboard', sent_at: new Date().toISOString() }) });
+      if (!res.ok) throw new Error(res.status);
+      gone[cid] = { at: Date.now(), qual: l.bucket === 'won' ? '' : qualOf(l) }; saveGone(); prep(state.data); render();
+      toast(l.name + ' deleted. It leaves the CRM within a few minutes.');
+    } catch (err) {
+      b.disabled = false; b.classList.remove('armed'); b.textContent = 'Delete';
+      toast('Could not delete. Check your signal and try again.');
+    }
+  });
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-refresh]'); if (!b || !state.code) return;
+    var all = document.querySelectorAll('[data-refresh]'); all.forEach(function (x) { x.textContent = 'Checking...'; });
+    load(state.code).then(function (d) { clearDonePending(d); state.data = prep(d); render(); toast('Up to date.'); })
+      .catch(function () { toast('Could not reach the dashboard. Try again in a moment.'); })
+      .then(function () { all.forEach(function (x) { x.textContent = 'Refresh'; }); });
   });
   $('lockForm').addEventListener('submit', function (e) { e.preventDefault(); open($('code').value); });
   document.addEventListener('click', function (e) { var b = e.target.closest('[data-f]'); if (b) setFilter(b.getAttribute('data-f')); });
@@ -729,8 +818,8 @@
   $('lockBtn').addEventListener('click', function () { store.clear(); state.data = null; $('code').value = ''; $('app').hidden = true; $('lock').hidden = false; });
   setInterval(function () {
     if (!state.code || document.hidden) return;
-    load(state.code).then(function (d) { state.data = d; clearDonePending(d); if (!busy()) render(); }).catch(function () {});
-  }, 2 * 60 * 1000);
+    load(state.code).then(function (d) { clearDonePending(d); state.data = prep(d); if (!busy()) render(); }).catch(function () {});
+  }, 60 * 1000);
   setInterval(function () { if (state.data) { $('ago').textContent = ago(state.data.generatedAt); $('ago2').textContent = ago(state.data.generatedAt); } }, 30000);
 
   // Passcode can arrive in the link (#k=CODE). The part after # never leaves the phone.

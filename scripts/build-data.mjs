@@ -40,9 +40,11 @@ async function api(path, { method = 'GET', body, version = '2021-07-28' } = {}) 
     });
     if (res.status === 429 && res.headers.get('x-ratelimit-daily-remaining') === '0') {
       const h = Math.round(Number(res.headers.get('x-ratelimit-daily-reset') || 0) / 36e5 * 10) / 10;
-      console.log(`GoHighLevel daily API limit reached (resets in about ${h} h). Keeping the last published dashboard.`);
-      if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, 'skip=true\n');
+      console.log(`GoHighLevel daily API limit reached (resets in about ${h} h). Keeping the last published leads.`);
       await saveCache();
+      // If the page itself changed (new commit), still publish it with the last published lead data.
+      const pageOnly = await publishPageOnly().catch(e => { console.warn('page-only publish failed:', e.message); return false; });
+      if (!pageOnly && process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, 'skip=true\n');
       process.exit(0);
     }
     if (res.status === 429 || res.status >= 500) { await sleep(1500 * (attempt + 1)); continue; }
@@ -50,6 +52,23 @@ async function api(path, { method = 'GET', body, version = '2021-07-28' } = {}) 
     return res.json();
   }
   throw new Error(`${path.split('?')[0]} kept failing`);
+}
+
+// Publish the current page with the lead data that is already live (used when the API cap is reached).
+async function publishPageOnly() {
+  const LIVE = process.env.LIVE_URL || 'https://louieva.github.io/wykes-leads/';
+  const BUILD = (process.env.GITHUB_SHA || 'local').slice(0, 12);
+  const res = await fetch(LIVE + 'data.enc.json?t=' + Date.now(), { cache: 'no-store' });
+  if (!res.ok) throw new Error('live data ' + res.status);
+  const file = await res.json();
+  if (file.build === BUILD) return false;   // page already live: nothing new to publish
+  file.build = BUILD;
+  await mkdir(OUT, { recursive: true });
+  await cp('site', OUT, { recursive: true });
+  await writeFile(`${OUT}/index.html`, (await readFile(`${OUT}/index.html`, 'utf8')).replace('__BUILD__', BUILD));
+  await writeFile(`${OUT}/data.enc.json`, JSON.stringify(file));
+  console.log('Published the updated page with the last published leads.');
+  return true;
 }
 
 const DAY = 864e5, now = Date.now();
@@ -100,8 +119,11 @@ const ACTIONS = {
   quote_sent:    { tag: 'quote-sent', stage: /quote/i, status: 'open' },
   won:           { tag: 'won', stage: /^won$/i, status: 'won' },
   lost:          { tag: 'lost', stage: /^lost$/i, status: 'lost' },
+  shopping:      { tag: 'shopping-around', stage: /nurture/i, status: 'open' },
+  delete:        { del: true },   // the owner pressed Delete on the dashboard: remove the contact and its deal
   note:          {},
 };
+const deleted = new Set();
 let applied = 0, notesFetched = 0;
 // Notes are re-read only for leads that changed, plus the few most recently updated ones
 // (dashboard updates arrive as notes and may not change the contact's update time).
@@ -123,6 +145,12 @@ for (const c of contacts.slice(0, DETAIL_LIMIT)) {
     const act = ACTIONS[key] || ACTIONS.note;
     const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || c.contactName || 'lead';
     try {
+      if (act.del) {
+        await api(`/contacts/${c.id}`, { method: 'DELETE' });
+        deleted.add(c.id); delete cache[c.id]; applied++;
+        console.log('Deleted a lead from the dashboard');
+        break;
+      }
       if (act.tag) await api(`/contacts/${c.id}/tags`, { method: 'POST', body: { tags: [act.tag] } });
       // Any update from the dashboard means the owner has acted: stop the "owner has not answered" chase (WF6).
       if ((c.tags || []).includes('waiting-owner')) {
@@ -190,6 +218,7 @@ function bucketOf(o) {
 const leads = [];
 let staleBudget = 6, detailsFetched = 0;   // also re-check up to 6 unchanged leads a run whose details are over 6 h old
 for (const [i, c] of contacts.entries()) {
+  if (deleted.has(c.id)) continue;
   const o = oppByContact[c.id], conv = convByContact[c.id], si = o ? stageInfo[o.pipelineStageId] || {} : {};
   let f = Object.fromEntries((c.customFields || []).map(cf => [fieldKey[cf.id] || cf.id, cf.value ?? cf.fieldValue]));
   const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || c.contactName || c.companyName || c.email || c.phone || 'Unnamed lead';
@@ -268,6 +297,18 @@ for (const [i, c] of contacts.entries()) {
     : (lead.source || 'Other');
   if (!lead.source || /^(direct traffic|crm ui)$/i.test(lead.source)) lead.source = lead.channel;
 
+  // Qualification in three plain groups:
+  //   qualified  = handed to the owner (interested, visit booked, quoted or won)
+  //   qualifying = still being qualified (new enquiry or the AI is talking to them)
+  //   not        = not qualified, shopping around or lost
+  const QUAL_TAGS = ['qualified-lead', 'hot-lead', 'waiting-owner', 'owner-answered', 'site-visit-booked', 'quote-sent', 'won'];
+  const NOT_TAGS = ['not-qualified', 'shopping-around', 'nurture', 'lost'];
+  lead.qual = ['owner', 'booked', 'quote', 'won'].includes(lead.bucket) ? 'qualified'
+    : ['nurture', 'lost'].includes(lead.bucket) ? 'not'
+    : tagsAll.some(t => NOT_TAGS.includes(t)) ? 'not'
+    : tagsAll.some(t => QUAL_TAGS.includes(t)) ? 'qualified'
+    : 'qualifying';
+
   // Does a person need to step in? Each reason is a short plain sentence.
   const stillOpen = !['won', 'lost', 'nurture'].includes(lead.bucket);
   const why = [];
@@ -277,7 +318,9 @@ for (const [i, c] of contacts.entries()) {
     if (lead.bucket === 'owner' || tagsAll.includes('waiting-owner')) why.push('Interested: pick a site visit day');
     if ((lead.tasks || []).some(t => t.due && ts(t.due) < now)) why.push('A reminder is overdue');
     const contacted = tagsAll.some(t => ['called', 'no-answer', 'owner-answered', 'quote-sent', 'site-visit-booked'].includes(t));
-    if (lead.bucket === 'new' && !contacted && ts(c.dateAdded) < now - DAY && ts(c.dateAdded) > now - 21 * DAY) why.push('No one has called them yet');
+    // 24-hour follow-up check. Stops once the lead is qualified and handed to the owner.
+    const noFollowUp = lead.qual === 'qualifying' && !contacted && !lead.replied && ts(c.dateAdded) < now - DAY && ts(c.dateAdded) > now - 21 * DAY;
+    if (noFollowUp || (lead.qual === 'qualifying' && tagsAll.includes('no-followup-24h') && !contacted)) why.push('No follow-up within 24 hours');
   }
   lead.why = why;
   lead.isNew = ts(c.dateAdded) >= now - 2 * DAY;
@@ -304,6 +347,10 @@ const kpis = {
   nurture: inB('nurture').length, lost: inB('lost').length, totalLeads: leads.length,
   needsYou: leads.filter(l => l.why && l.why.length).length,
   new48: leads.filter(l => l.isNew).length,
+  qualified: leads.filter(l => l.qual === 'qualified' && l.bucket !== 'won').length,
+  qualifying: leads.filter(l => l.qual === 'qualifying').length,
+  notQualified: leads.filter(l => l.qual === 'not').length,
+  noFollowUp: leads.filter(l => (l.why || []).includes('No follow-up within 24 hours')).length,
 };
 const dublinEndOfToday = startOfToday + DAY;
 const reminders = leads.flatMap(l => (l.tasks || []).map(t => ({ title: t.title, body: t.body, due: t.due, contactId: l.contactId, name: l.name, phone: l.phone })))
