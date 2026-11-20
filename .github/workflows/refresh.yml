@@ -2,7 +2,7 @@ name: Refresh Wykes leads
 
 on:
   schedule:
-    - cron: "23,53 * * * *"   # backup only; scripts/watch.mjs starts refreshes on change
+    - cron: "23 * * * *"   # backup only; scripts/watch.mjs starts refreshes on change
   workflow_dispatch:
   push:
     branches: [main]
@@ -28,18 +28,35 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # Lead details from earlier runs, so only changed leads are fetched again (GHL allows 10,000 calls a day).
+      - name: Restore lead cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache
+          key: lead-cache-${{ github.run_id }}
+          restore-keys: lead-cache-
       - name: Pull leads from GoHighLevel and encrypt
+        id: build
         run: node scripts/build-data.mjs
         env:
           GHL_PIT: ${{ secrets.GHL_PIT }}
           GHL_LOCATION_ID: ${{ secrets.GHL_LOCATION_ID }}
           DASH_PASSCODE: ${{ secrets.DASH_PASSCODE }}
           DASH_HOOK_URL: ${{ secrets.DASH_HOOK_URL }}
+      - name: Save lead cache
+        if: always() && hashFiles('.cache/details.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .cache
+          key: lead-cache-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: actions/configure-pages@v5
+        if: steps.build.outputs.skip != 'true'
       - uses: actions/upload-pages-artifact@v4
+        if: steps.build.outputs.skip != 'true'
         with:
           path: dist
       - id: deploy
+        if: steps.build.outputs.skip != 'true'
         uses: actions/deploy-pages@v4
       - name: Make sure the GHL watcher is running
         if: always()

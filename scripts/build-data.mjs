@@ -1,9 +1,29 @@
 // Pulls Wykes leads from GoHighLevel, summarises them and writes an encrypted data file for the dashboard.
 // Secrets come from the environment (GitHub Actions secrets). Nothing sensitive is written in plain text.
 import { webcrypto as crypto } from 'node:crypto';
-import { mkdir, writeFile, cp } from 'node:fs/promises';
+import { mkdir, writeFile, cp, readFile, appendFile } from 'node:fs/promises';
 
+// Per-lead details are kept between runs (GitHub Actions cache) so a refresh only asks
+// GoHighLevel about leads that changed. The sub-account API key allows 10,000 calls a day.
+// The repo is public, so the cache is encrypted with a key derived from the GHL secret.
 const PIT = process.env.GHL_PIT, L = process.env.GHL_LOCATION_ID, PASS = process.env.DASH_PASSCODE;
+const CACHE_FILE = '.cache/details.json';
+const cacheKey = PIT ? await crypto.subtle.importKey('raw', await crypto.subtle.digest('SHA-256', new TextEncoder().encode('wykes-cache|' + L + '|' + PIT)), 'AES-GCM', false, ['encrypt', 'decrypt']) : null;
+let cache = {};
+try {
+  const box = JSON.parse(await readFile(CACHE_FILE, 'utf8'));
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: Buffer.from(box.iv, 'base64') }, cacheKey, Buffer.from(box.ct, 'base64'));
+  cache = JSON.parse(new TextDecoder().decode(plain));
+} catch { cache = {}; }   // no cache, or made with an old key: fetch everything once
+async function saveCache() {
+  try {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, cacheKey, new TextEncoder().encode(JSON.stringify(cache)));
+    await mkdir('.cache', { recursive: true });
+    await writeFile(CACHE_FILE, JSON.stringify({ iv: Buffer.from(iv).toString('base64'), ct: Buffer.from(ct).toString('base64') }));
+  } catch (e) { console.warn('cache save failed:', e.message); }
+}
+
 const PIPELINE_NAME = process.env.PIPELINE_NAME || 'Website Leads';
 const OUT = process.env.OUT_DIR || 'dist';
 if (!PIT || !L || !PASS) { console.error('Missing GHL_PIT, GHL_LOCATION_ID or DASH_PASSCODE'); process.exit(1); }
@@ -18,6 +38,13 @@ async function api(path, { method = 'GET', body, version = '2021-07-28' } = {}) 
       method, body: body ? JSON.stringify(body) : undefined,
       headers: { Authorization: `Bearer ${PIT}`, Version: version, Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 (compatible; WykesLeadsDashboard/1.0)' },
     });
+    if (res.status === 429 && res.headers.get('x-ratelimit-daily-remaining') === '0') {
+      const h = Math.round(Number(res.headers.get('x-ratelimit-daily-reset') || 0) / 36e5 * 10) / 10;
+      console.log(`GoHighLevel daily API limit reached (resets in about ${h} h). Keeping the last published dashboard.`);
+      if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, 'skip=true\n');
+      await saveCache();
+      process.exit(0);
+    }
     if (res.status === 429 || res.status >= 500) { await sleep(1500 * (attempt + 1)); continue; }
     if (!res.ok) throw new Error(`${method} ${path.split('?')[0]} -> ${res.status} ${(await res.text()).slice(0, 160)}`);
     return res.json();
@@ -75,10 +102,17 @@ const ACTIONS = {
   lost:          { tag: 'lost', stage: /^lost$/i, status: 'lost' },
   note:          {},
 };
-let applied = 0;
+let applied = 0, notesFetched = 0;
+// Notes are re-read only for leads that changed, plus the few most recently updated ones
+// (dashboard updates arrive as notes and may not change the contact's update time).
+const recentlyUpdated = new Set(contacts.slice().sort((a, b) => ts(b.dateUpdated) - ts(a.dateUpdated)).slice(0, 8).map(c => c.id));
 for (const c of contacts.slice(0, DETAIL_LIMIT)) {
-  let notes = [];
-  try { notes = (await api(`/contacts/${c.id}/notes`)).notes || []; } catch (e) { console.warn('notes', e.message); }
+  const cc = cache[c.id] || (cache[c.id] = {});
+  let notes = cc.notes || [];
+  if (!cc.notes || cc.nStamp !== c.dateUpdated || recentlyUpdated.has(c.id)) {
+    try { notes = (await api(`/contacts/${c.id}/notes`)).notes || []; cc.notes = notes; cc.nStamp = c.dateUpdated; notesFetched++; }
+    catch (e) { console.warn('notes', e.message); }
+  }
   notesByContact[c.id] = notes;
   const pending = notes.filter(n => /^\s*\[Dashboard\]/.test(stripHtml(n.body))).sort((a, b) => ts(a.dateAdded) - ts(b.dateAdded));
   for (const n of pending) {
@@ -154,6 +188,7 @@ function bucketOf(o) {
 
 // 5. Build each lead
 const leads = [];
+let staleBudget = 6, detailsFetched = 0;   // also re-check up to 6 unchanged leads a run whose details are over 6 h old
 for (const [i, c] of contacts.entries()) {
   const o = oppByContact[c.id], conv = convByContact[c.id], si = o ? stageInfo[o.pipelineStageId] || {} : {};
   let f = Object.fromEntries((c.customFields || []).map(cf => [fieldKey[cf.id] || cf.id, cf.value ?? cf.fieldValue]));
@@ -169,8 +204,14 @@ for (const [i, c] of contacts.entries()) {
     lastMessage: conv && conv.lastMessageDate && isRealMsg(conv.lastMessageType) ? { dir: conv.lastMessageDirection, at: conv.lastMessageDate, type: String(conv.lastMessageType || '').replace('TYPE_', '').toLowerCase(), text: short(conv.lastMessageBody, 110) } : null,
     replied: false,
   };
+  const cc = cache[c.id] || (cache[c.id] = {});
+  const stamp = `${c.dateUpdated || ''}|${conv ? conv.lastMessageDate || '' : ''}|${o ? o.updatedAt || '' : ''}`;
+  const need = i < DETAIL_LIMIT && (cc.dStamp !== stamp || (now - (cc.dAt || 0) > 6 * 36e5 && staleBudget-- > 0));
+  if (need) detailsFetched++;
   if (i < DETAIL_LIMIT && !Object.keys(f).length) {
-    try { const { contact = {} } = await api(`/contacts/${c.id}`); f = Object.fromEntries((contact.customFields || []).map(cf => [fieldKey[cf.id] || cf.id, cf.value ?? cf.fieldValue])); } catch (e) { console.warn('contact', e.message); }
+    if (need || !cc.fields) {
+      try { const { contact = {} } = await api(`/contacts/${c.id}`); f = Object.fromEntries((contact.customFields || []).map(cf => [fieldKey[cf.id] || cf.id, cf.value ?? cf.fieldValue])); cc.fields = f; } catch (e) { console.warn('contact', e.message); }
+    } else f = cc.fields;
   }
   Object.assign(lead, {
     town: short(f.town_or_eircode || c.city || '', 40), service: short(f.service_requested, 40), timeframe: short(f.timeframe, 30),
@@ -182,6 +223,9 @@ for (const [i, c] of contacts.entries()) {
     const nList = notesByContact[c.id] || [];
     lead.notes = nList.slice().sort((a, b) => ts(b.dateAdded) - ts(a.dateAdded)).slice(0, 4).map(x => ({ text: short(strip(x.body).replace(/\s*\|?\s*#s=.*$/, ''), 300), at: x.dateAdded }));
     lead.noteCount = nList.length;
+    if (!need && cc.tasks) {
+      lead.tasks = cc.tasks; lead.visitTasks = (cc.visitTasks || []).filter(x => ts(x.start) >= now - 12 * 36e5); lead.appointments = (cc.appointments || []).filter(x => ts(x.start) >= now - DAY);
+    } else {
     try {
       const t = await api(`/contacts/${c.id}/tasks`);
       const open = (t.tasks || []).filter(x => !x.completed).sort((a, b) => ts(a.dueDate) - ts(b.dueDate));
@@ -192,18 +236,26 @@ for (const [i, c] of contacts.entries()) {
       const a = await api(`/contacts/${c.id}/appointments`);
       lead.appointments = (a.events || []).filter(x => ts(x.endTime || x.startTime) >= now - DAY && !/cancel/i.test(x.appointmentStatus || '')).sort((a2, b2) => ts(a2.startTime) - ts(b2.startTime)).slice(0, 3).map(x => ({ title: short(x.title, 80), start: x.startTime, status: x.appointmentStatus || '' }));
     } catch (e) { lead.appointments = []; }
+    cc.tasks = lead.tasks; cc.visitTasks = lead.visitTasks; cc.appointments = lead.appointments;
+    }
     lead.appointments = (lead.appointments || []).concat(lead.visitTasks || []).sort((a2, b2) => ts(a2.start) - ts(b2.start)).slice(0, 3);
     delete lead.visitTasks;
   }
   if (i < DETAIL_LIMIT && conv) {
-    try {
-      const m = await api(`/conversations/${conv.id}/messages?limit=100`, { version: '2021-04-15' });
-      const msgs = (m.messages && m.messages.messages) || m.messages || [];
-      const inbound = msgs.filter(x => x.direction === 'inbound' && isRealMsg(x.messageType));
-      lead.replied = inbound.length > 0;
-      if (inbound.length) lead.repliedAt = inbound.map(x => x.dateAdded).sort().pop();
-    } catch (e) { lead.replied = lead.needsReply; }
+    if (!need && cc.replied !== undefined) {
+      lead.replied = cc.replied; if (cc.repliedAt) lead.repliedAt = cc.repliedAt;
+    } else {
+      try {
+        const m = await api(`/conversations/${conv.id}/messages?limit=100`, { version: '2021-04-15' });
+        const msgs = (m.messages && m.messages.messages) || m.messages || [];
+        const inbound = msgs.filter(x => x.direction === 'inbound' && isRealMsg(x.messageType));
+        lead.replied = inbound.length > 0;
+        if (inbound.length) lead.repliedAt = inbound.map(x => x.dateAdded).sort().pop();
+        cc.replied = lead.replied; cc.repliedAt = lead.repliedAt || null;
+      } catch (e) { lead.replied = lead.needsReply; }
+    }
   }
+  if (need) { cc.dStamp = stamp; cc.dAt = now; }
   leads.push(lead);
 }
 
@@ -268,8 +320,9 @@ const b64 = u => Buffer.from(u).toString('base64');
 await mkdir(OUT, { recursive: true });
 await cp('site', OUT, { recursive: true });
 const BUILD = (process.env.GITHUB_SHA || 'local').slice(0, 12);
-const { readFile } = await import('node:fs/promises');
 await writeFile(`${OUT}/index.html`, (await readFile(`${OUT}/index.html`, 'utf8')).replace('__BUILD__', BUILD));
 await writeFile(`${OUT}/data.enc.json`, JSON.stringify({ v: 1, iter: ITER, salt: b64(salt), iv: b64(iv), ct: b64(ct), at: data.generatedAt, build: BUILD }));
+await saveCache();
+console.log(`Re-read notes for ${notesFetched} and details for ${detailsFetched} lead(s); the rest came from the cache.`);
 console.log(`OK: ${leads.length} leads (contacts), ${opps.length} deals in ${pipelines.length} pipelines, ${Object.keys(convByContact).length} conversations, ${reminders.length} open reminders, ${leads.reduce((n, l) => n + (l.noteCount || 0), 0)} notes, ${visits.length} upcoming visits, ${calls} API calls`);
 console.log('KPIs', JSON.stringify(kpis));
