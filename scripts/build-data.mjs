@@ -103,6 +103,12 @@ for (let page = 1; page <= 20; page++) {
 // Not leads: the owner, internal/test contacts, and suppliers / job seekers / sales pitches the AI tagged not-a-lead
 const internal = c => (c.tags || []).some(t => /^(owner|internal|test|not-a-lead)$/i.test(t)) || /internal|not a lead/i.test(c.source || '');
 contacts = contacts.filter(c => !internal(c));
+// Fresh start (21 Nov 2026): the dashboard only shows leads created from FRESH_START on,
+// plus older contacts that come back (GHL tags anyone who replies "reactivated").
+// Nothing is deleted in GHL; tag an old contact "show-on-dashboard" to bring it back by hand.
+const FRESH_START = ts(process.env.FRESH_START || '2026-11-21T08:10:00Z');
+const BACK_TAGS = ['reactivated', 'show-on-dashboard'];
+contacts = contacts.filter(c => ts(c.dateAdded) >= FRESH_START || (c.tags || []).some(t => BACK_TAGS.includes(String(t).toLowerCase())));
 contacts.sort((a, b) => ts(b.dateAdded) - ts(a.dateAdded));
 
 // 3. Every opportunity in every pipeline, latest one per contact
