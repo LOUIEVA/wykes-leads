@@ -3,17 +3,19 @@
 // GitHub's own cron schedule often skips runs for hours.
 //
 // API budget: the sub-account key allows 10,000 GoHighLevel calls a day, shared with the
-// refresh job. This watcher uses 5 calls every 3 minutes (about 2,400 a day), and slows to every 15 minutes
-// once fewer than 2,500 calls are left. Refreshes start at most every 5 minutes.
+// refresh job. This watcher uses 3 calls a minute, plus 2 note checks every third minute (about 5,300 a day),
+// and slows to every 15 minutes once fewer than 2,500 calls are left. Refreshes start at most every 90 seconds.
 import { writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 
 const PIT = process.env.GHL_PIT, L = process.env.GHL_LOCATION_ID;
 const GH = process.env.GH_TOKEN, REPO = process.env.REPO;
 const MINUTES = Number(process.env.WATCH_MINUTES || 340);   // stay under the 6h job limit
-const EVERY_S = 180;                                         // how often to look at GHL
+const EVERY_S = 60;                                          // how often to look at GHL
 const NOTE_CONTACTS = 2;                                     // dashboard updates arrive as notes on these
-const MIN_GAP_S = 300;                                       // never start refreshes closer than this
+const MIN_GAP_S = 90;                                        // never start refreshes closer than this
+const NOTE_EVERY = 3;                                        // check dashboard notes every 3rd round
+let round = 0, lastNotes = '';
 if (!PIT || !L || !GH || !REPO) { console.error('Missing GHL_PIT, GHL_LOCATION_ID, GH_TOKEN or REPO'); process.exit(1); }
 
 const BASE = 'https://services.leadconnectorhq.com';
@@ -47,11 +49,16 @@ async function fingerprint() {
   parts.push('o', o.meta?.total, ...(o.opportunities || []).map((x) => `${x.id}:${x.updatedAt}:${x.status}:${x.pipelineStageId}:${x.monetaryValue}`));
   const cv = await ghl(`/conversations/search?locationId=${L}&limit=20&sortBy=last_message_date&sort=desc`, { version: '2021-04-15' });
   parts.push('m', ...(cv.conversations || []).map((x) => `${x.id}:${x.lastMessageDate}:${x.unreadCount}`));
-  for (const c of contacts.slice(0, NOTE_CONTACTS)) {
-    const n = await ghl(`/contacts/${c.id}/notes`);
-    const notes = n.notes || [];
-    parts.push(`n${c.id}`, notes.length, ...notes.map((x) => `${x.id}:${(x.body || '').length}`));
+  if (round++ % NOTE_EVERY === 0) {
+    const np = [];
+    for (const c of contacts.slice(0, NOTE_CONTACTS)) {
+      const n = await ghl(`/contacts/${c.id}/notes`);
+      const notes = n.notes || [];
+      np.push(`n${c.id}`, notes.length, ...notes.map((x) => `${x.id}:${(x.body || '').length}`));
+    }
+    lastNotes = np.join('|');
   }
+  parts.push(lastNotes);
   return createHash('sha256').update(parts.join('|')).digest('hex');
 }
 

@@ -260,6 +260,14 @@
   .tag.q-no { background: #ece9e2; color: #6b6b6b; font-weight: 700; }
   .linkbtn.refresh { color: inherit; text-decoration: underline; font: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
   .toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--forest); color: #fff; padding: 12px 18px; border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.25); z-index: 50; max-width: calc(100% - 32px); font-size: 15px; }
+.enquiry .enq-msg{white-space:pre-wrap;margin:.2rem 0 .5rem;line-height:1.45}
+.enquiry .enq-q{margin:.4rem 0;font-size:.92em}
+.enq-photos{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.4rem}.enq-photos a{padding:.2rem .55rem;border:1px solid currentColor;border-radius:999px;font-size:.85em;text-decoration:none}
+.chatlog summary{cursor:pointer;list-style:none}.chatlog summary::-webkit-details-marker{display:none}.chatlog summary h4{display:inline}
+.chatlog summary h4::after{content:' ▸';opacity:.6}.chatlog[open] summary h4::after{content:' ▾'}
+.chatlog .cm{margin:.45rem 0;padding:.45rem .6rem;border-radius:10px;max-width:92%;font-size:.93em;line-height:1.4}
+.chatlog .cm.in{background:rgba(127,127,127,.12)}.chatlog .cm.out{background:rgba(31,122,60,.12);margin-left:auto}
+.chatlog .cm small{opacity:.6;font-size:.8em}.chatlog .cm div{white-space:pre-wrap;margin-top:.15rem}
 </style>
 <script src="vendor/Sortable.min.js" defer></script>
 </head>
@@ -461,7 +469,7 @@
   function prep(d) {
     if (!d) return d;
     var ids = {}; d.leads.forEach(function (l) { ids[l.contactId] = 1; });
-    Object.keys(gone).forEach(function (cid) { if (!ids[cid] || Date.now() - gone[cid].at > 3 * 864e5) delete gone[cid]; });
+    Object.keys(gone).forEach(function (cid) { if (!ids[cid] || Date.now() - gone[cid].at > 864e5) delete gone[cid]; });
     saveGone();
     d.leads = d.leads.filter(function (l) { return !gone[l.contactId]; });
     d.leads.forEach(function (l) {
@@ -578,7 +586,7 @@
     var q = ($('q').value || '').trim().toLowerCase();
     var list = d.leads.filter(fn(state.filter)).filter(function (l) {
       if (!q) return true;
-      return [l.name, l.town, l.service, l.phone, l.email, l.stage, l.message].join(' ').toLowerCase().indexOf(q) !== -1;
+      return [l.name, l.town, l.address, l.service, l.phone, l.email, l.stage, l.message].join(' ').toLowerCase().indexOf(q) !== -1;
     });
     list = sortLeads(list);
     $('leadCount').textContent = list.length + (list.length === 1 ? ' lead' : ' leads');
@@ -592,10 +600,28 @@
       var rows = [
         ['Phone', l.phone ? '<a href="tel:' + esc(tel) + '">' + esc(l.phone) + '</a>' : ''],
         ['Email', l.email ? '<a href="mailto:' + esc(l.email) + '">' + esc(l.email) + '</a>' : ''],
-        ['Town', esc(l.town)], ['Job', esc(l.service)], ['When', esc(l.timeframe)], ['Size', esc(l.size)],
-        ['Value', l.value ? euro(l.value) : ''], ['Source', esc(l.source)], ['Added', esc(added)]
+        ['Job address', l.address ? '<a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(l.address) + '" target="_blank" rel="noopener">' + esc(l.address) + '</a>' : ''],
+        ['Town', l.address && l.address.toLowerCase().indexOf((l.town || '').toLowerCase()) !== -1 ? '' : esc(l.town)], ['Job', esc(l.service)], ['When', esc(l.timeframe)], ['Size', esc(l.size)],
+        ['Value', l.value ? euro(l.value) : ''], ['Source', esc(l.source)], ['Campaign', esc(l.campaign)],
+        ['Page', l.page ? '<a href="' + esc(/^https?:/.test(l.page) ? l.page : 'https://' + l.page) + '" target="_blank" rel="noopener">' + esc(l.page.replace(/^https?:\/\//, '').slice(0, 60)) + '</a>' : ''],
+        ['Added', esc(added)]
       ].filter(function (r) { return r[1]; });
       var extra = '';
+      // Their enquiry: everything they told us, in full
+      var enq = '';
+      if (l.message) enq += '<p class="enq-msg">' + esc(l.message) + '</p>';
+      if (l.answers && l.answers.length) enq += '<dl class="details enq-answers">' + l.answers.map(function (a) { return '<dt>' + esc(a[0]) + '</dt><dd>' + esc(a[1]) + '</dd>'; }).join('') + '</dl>';
+      if (l.ownerQuestion) enq += '<p class="enq-q"><b>Question for Clive:</b> ' + esc(l.ownerQuestion) + '</p>';
+      if (l.photos && l.photos.length) enq += '<div class="enq-photos">' + l.photos.map(function (u, i) { return '<a href="' + esc(u) + '" target="_blank" rel="noopener">Photo ' + (i + 1) + '</a>'; }).join('') + '</div>';
+      if (enq) extra += '<div class="sub-block enquiry"><h4>Their enquiry</h4>' + enq + '</div>';
+      if (l.chat && l.chat.length) {
+        var first = (l.name || '').split(' ')[0] || 'Lead';
+        extra += '<details class="sub-block chatlog"><summary><h4>Full chat (' + l.chat.length + ' messages)</h4></summary>' +
+          l.chat.map(function (m) {
+            var att = (m.a || []).map(function (u, i) { return ' <a href="' + esc(u) + '" target="_blank" rel="noopener">[file ' + (i + 1) + ']</a>'; }).join('');
+            return '<div class="cm ' + (m.d === 'in' ? 'in' : 'out') + '"><b>' + (m.d === 'in' ? esc(first) : 'Wykes') + '</b> <small>' + esc(ago(m.at)) + '</small><div>' + esc(m.t) + att + '</div></div>';
+          }).join('') + '</details>';
+      }
       if (l.appointments && l.appointments.length) extra += '<div class="sub-block"><h4>Site visit</h4>' + l.appointments.map(function (a) { var dl = dueLabel(a.start); return '<div class="task"><span>' + esc(a.title || 'Appointment') + '</span><small>' + esc(dl[0].replace('Overdue · ', '')) + '</small></div>'; }).join('') + '</div>';
       if (l.tasks && l.tasks.length) extra += '<div class="sub-block"><h4>Reminders</h4>' + l.tasks.map(function (t) { var dl = dueLabel(t.due); return '<div class="task"><span>' + esc(t.title) + '</span><small class="due ' + dl[1] + '">' + esc(dl[0]) + '</small></div>'; }).join('') + '</div>';
       if (l.notes && l.notes.length) {
@@ -611,7 +637,7 @@
       var headTags = qualTag(l) + stageTag(l) + (needs ? '<span class="tag warn">Needs a reply</span>' : '') +
         ((l.why && l.why.length && !needs) ? '<span class="tag warn">Needs you</span>' : '');
       var whyBlock = l.why && l.why.length ? '<div class="why"><b>Needs you:</b> ' + l.why.map(esc).join(' · ') + '</div>' : '';
-      var msg = l.lastMessage && l.lastMessage.text ? '<div class="msg"><b>' + (l.lastMessage.dir === 'inbound' ? esc(l.name.split(' ')[0]) : 'You') + ' (' + esc(ago(l.lastMessage.at)) + '):</b> ' + esc(l.lastMessage.text) + '</div>' : (l.message ? '<div class="msg"><b>Their job:</b> ' + esc(l.message) + '</div>' : '');
+      var msg = l.lastMessage && l.lastMessage.text ? '<div class="msg"><b>' + (l.lastMessage.dir === 'inbound' ? esc(l.name.split(' ')[0]) : 'You') + ' (' + esc(ago(l.lastMessage.at)) + '):</b> ' + esc(l.lastMessage.text) + '</div>' : '';
       var open = isOpen(l, total);
       var sub = [l.service, l.town, l.channel, ago(l.createdAt)].filter(Boolean).map(esc).join('<span class="dot">·</span>');
       return '<article class="lead b-' + esc(l.bucket || 'new') + (needs ? ' flag' : '') + (open ? ' open' : '') + '" data-cid="' + esc(l.contactId) + '">' +
@@ -819,7 +845,7 @@
   setInterval(function () {
     if (!state.code || document.hidden) return;
     load(state.code).then(function (d) { clearDonePending(d); state.data = prep(d); if (!busy()) render(); }).catch(function () {});
-  }, 60 * 1000);
+  }, 30 * 1000);
   setInterval(function () { if (state.data) { $('ago').textContent = ago(state.data.generatedAt); $('ago2').textContent = ago(state.data.generatedAt); } }, 30000);
 
   // Passcode can arrive in the link (#k=CODE). The part after # never leaves the phone.

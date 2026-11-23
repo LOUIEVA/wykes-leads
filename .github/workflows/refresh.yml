@@ -57,6 +57,14 @@ jobs:
           path: dist
       - id: deploy
         if: steps.build.outputs.skip != 'true'
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      # GitHub Pages sometimes fails with "artifact not found" for a few seconds. Try again once.
+      - name: Wait before retrying the publish
+        if: steps.build.outputs.skip != 'true' && steps.deploy.outcome == 'failure'
+        run: sleep 20
+      - id: deploy_retry
+        if: steps.build.outputs.skip != 'true' && steps.deploy.outcome == 'failure'
         uses: actions/deploy-pages@v4
       - name: Make sure the GHL watcher is running
         if: always()

@@ -88,6 +88,11 @@ const short = (s, n) => (s || '').replace(/\s+/g, ' ').trim().slice(0, n);
 // 1. Field names and every pipeline
 const fieldsRes = await api(`/locations/${L}/customFields?model=contact`);
 const fieldKey = Object.fromEntries((fieldsRes.customFields || []).map(f => [f.id, (f.fieldKey || '').replace(/^contact\./, '')]));
+const fieldName = Object.fromEntries((fieldsRes.customFields || []).map(f => [(f.fieldKey || '').replace(/^contact\./, ''), f.name || '']));
+// Fields used for routing or shown elsewhere on the card; everything else the lead filled in is listed under "Their enquiry".
+const HIDE_FIELDS = /^(owner_question_code|owner_answer|ballpark_(high|low)|utm_|fbclid|gclid|lead_page_url|town_or_eircode|service_requested|timeframe|job_size|job_message|job_details_message|ballpark_text|project_address|job_photo|owner_question)/;
+const fieldText = v => Array.isArray(v) ? v.map(fieldText).filter(Boolean).join(', ') : (v && typeof v === 'object') ? Object.values(v).map(fieldText).filter(Boolean).join(', ') : String(v ?? '').trim();
+const photoUrls = v => { const out = []; const walk = x => { if (!x) return; if (typeof x === 'string') { (x.match(/https?:\/\/[^\s,"']+/g) || []).forEach(u => out.push(u)); } else if (Array.isArray(x)) x.forEach(walk); else if (typeof x === 'object') Object.entries(x).forEach(([k, y]) => { if (/^https?:/.test(k)) out.push(k); walk(y); }); }; walk(v); return [...new Set(out)].slice(0, 8); };
 const { pipelines = [] } = await api(`/opportunities/pipelines?locationId=${L}`);
 const stageInfo = {};
 pipelines.forEach(p => p.stages.forEach((s, i) => { stageInfo[s.id] = { pipeline: p.name, pipelineId: p.id, stage: s.name, order: i }; }));
@@ -264,6 +269,17 @@ for (const [i, c] of contacts.entries()) {
     size: short(f.job_size, 40), message: short(f.job_message, 160), ballpark: short(f.ballpark_text, 60),
     source: short(c.source || (c.attributionSource && (c.attributionSource.sessionSource || c.attributionSource.medium)) || f.utm_source || '', 30),
   });
+  // The full enquiry: job address, everything they wrote, every answered field, photos and where they came from.
+  const street = [c.address1, c.city, c.postalCode].filter(Boolean).join(', ');
+  Object.assign(lead, {
+    address: short(f.project_address || street, 160),
+    message: short(f.job_message || f.job_details_message || '', 1200),
+    ownerQuestion: short(f.owner_question, 300),
+    photos: photoUrls([f.job_photos, f.job_photo_uploads]),
+    campaign: short([f.utm_campaign, f.utm_content, f.utm_term].filter(Boolean).join(' / '), 120),
+    page: short(f.lead_page_url || (c.attributionSource && c.attributionSource.url) || '', 160),
+    answers: Object.entries(f).filter(([k, v]) => fieldName[k] && !HIDE_FIELDS.test(k) && fieldText(v)).slice(0, 25).map(([k, v]) => [short(fieldName[k], 60), short(fieldText(v), 400)]),
+  });
   if (i < DETAIL_LIMIT) {
     const strip = h => String(h || '').replace(/<br\s*\/?>(?!$)/gi, ' ').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
     const nList = notesByContact[c.id] || [];
@@ -288,7 +304,7 @@ for (const [i, c] of contacts.entries()) {
     delete lead.visitTasks;
   }
   if (i < DETAIL_LIMIT && conv) {
-    if (!need && cc.replied !== undefined) {
+    if (!need && cc.replied !== undefined && cc.chat !== undefined) {
       lead.replied = cc.replied; if (cc.repliedAt) lead.repliedAt = cc.repliedAt;
     } else {
       try {
@@ -298,17 +314,22 @@ for (const [i, c] of contacts.entries()) {
         lead.replied = inbound.length > 0;
         if (inbound.length) lead.repliedAt = inbound.map(x => x.dateAdded).sort().pop();
         cc.replied = lead.replied; cc.repliedAt = lead.repliedAt || null;
+        // The whole chat, oldest first, so the owner reads the enquiry exactly as it happened.
+        cc.chat = msgs.filter(x => isRealMsg(x.messageType) && (x.body || (x.attachments || []).length))
+          .sort((a, b) => ts(a.dateAdded) - ts(b.dateAdded)).slice(-40)
+          .map(x => ({ d: x.direction === 'inbound' ? 'in' : 'out', t: short(x.body, 600), a: (x.attachments || []).slice(0, 4), at: x.dateAdded }));
       } catch (e) { lead.replied = lead.needsReply; }
     }
   }
+  if (cc.chat && cc.chat.length) lead.chat = cc.chat;
   if (need) { cc.dStamp = stamp; cc.dAt = now; }
 
   // Where the lead came in, in plain words
   const tagsAll = (c.tags || []).map(t => String(t).toLowerCase());
   const page = String((c.attributionSource && (c.attributionSource.url || c.attributionSource.referrer)) || (c.lastAttributionSource && c.lastAttributionSource.url) || '').toLowerCase();
   const chat = tagsAll.includes('website-chat-lead');
-  lead.channel = /wykes-lp-artificial|artificial|grass/.test(page) ? (chat ? 'Grass page chat' : 'Grass landing page')
-    : /wykes-lp-fencing/.test(page) ? (chat ? 'Fencing page chat' : 'Fencing landing page')
+  lead.channel = /wykes-lp-artificial|artificial|grass\./.test(page) ? (chat ? 'Grass page chat' : 'Grass landing page')
+    : /wykes-lp-fencing|fencing\./.test(page) ? (chat ? 'Fencing page chat' : 'Fencing landing page')
     : chat ? 'Website chat or voice'
     : tagsAll.includes('website-lead') ? 'Website quote form'
     : (lead.source || 'Other');
