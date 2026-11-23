@@ -849,10 +849,18 @@
   setInterval(function () { if (state.data) { $('ago').textContent = ago(state.data.generatedAt); $('ago2').textContent = ago(state.data.generatedAt); } }, 30000);
 
   // Passcode can arrive in the link (#k=CODE). The part after # never leaves the phone.
-  var m = location.hash.match(/k=([A-Za-z0-9-]+)/);
-  if (m) { store.set(m[1].toUpperCase()); history.replaceState(null, '', location.pathname); }
+  // Any characters are allowed in the code (spaces arrive as %20 or +).
+  var m = location.hash.match(/[#&]k=([^&]+)/), fromLink = false;
+  if (m) {
+    var raw = m[1]; try { raw = decodeURIComponent(raw.replace(/\+/g, ' ')); } catch (e) {}
+    raw = raw.trim(); if (raw) { store.set(raw.toUpperCase()); fromLink = true; }
+    history.replaceState(null, '', location.pathname);
+  }
   var saved = store.get();
-  if (saved) { $('code').value = saved; open(saved, true); }
+  if (saved) {
+    $('code').value = saved;
+    open(saved, true).then(function () { if (fromLink && $('app').hidden) $('err').textContent = 'The code in this link did not work. Ask Louie for a new link.'; });
+  }
 })();
 </script>
 </body>
