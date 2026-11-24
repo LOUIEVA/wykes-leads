@@ -280,9 +280,11 @@ for (const [i, c] of contacts.entries()) {
   }
   // Facebook lead form answers (fence type, length, timing, owner, how ready they are) and the ad they came from.
   const pick = k => (k ? fieldText(f[k]) : '');
-  const at = c.attributionSource || {};
+  // A returning contact's first attribution is their old enquiry, so use the latest one for them.
+  const at = (c.firstAdded && c.lastAttributionSource) || c.attributionSource || {};
   const adCampaign = [at.utmCampaign || at.campaign, at.utmContent || at.adName].filter(Boolean).join(' / ');
-  const fbForm = pick(FB.form) || (/facebook/i.test(c.source || at.utmSource || '') && /lead form/i.test(adCampaign) ? adCampaign : '');
+  const fromFb = /facebook|paid social|instagram/i.test([c.source, at.utmSource, at.medium, at.utmMedium, at.sessionSource].filter(Boolean).join(' '));
+  const fbForm = pick(FB.form) || (fromFb && /lead form/i.test(adCampaign) ? adCampaign : '');
   const topic = /grass/i.test(fbForm) ? 'Artificial grass' : /fenc/i.test(fbForm) ? 'Fencing' : '';
   const fbType = pick(FB.service);
   Object.assign(lead, {
@@ -495,6 +497,6 @@ await writeFile(`${OUT}/data.enc.json`, JSON.stringify({ v: 1, iter: ITER, salt:
 await saveCache();
 if (svcTagsAdded) console.log(`Added service tags to ${svcTagsAdded} lead(s)`);
 console.log(`Re-read notes for ${notesFetched} and details for ${detailsFetched} lead(s); the rest came from the cache.`);
-console.log(`Facebook lead form leads on the dashboard: ${leads.filter(l => l.fbForm).length} (${leads.filter(l => l.fbForm).map(l => [l.fbForm, l.size || '-', l.intent || '-'].join(' | ')).join('; ')})`);
+console.log(`Facebook lead form leads on the dashboard: ${leads.filter(l => l.fbForm).length} (${leads.filter(l => l.fbForm).map(l => [l.fbForm, l.size || '-', l.intent || '-'].join(' | ')).join('; ')}); returning contacts with a new enquiry: ${contacts.filter(c => c.firstAdded).length}`);
 console.log(`OK: ${leads.length} leads (contacts), ${opps.length} deals in ${pipelines.length} pipelines, ${Object.keys(convByContact).length} conversations, ${reminders.length} open reminders, ${leads.reduce((n, l) => n + (l.noteCount || 0), 0)} notes, ${visits.length} upcoming visits, ${calls} API calls`);
 console.log('KPIs', JSON.stringify(kpis));
