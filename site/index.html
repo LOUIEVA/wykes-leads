@@ -602,6 +602,7 @@
         ['Email', l.email ? '<a href="mailto:' + esc(l.email) + '">' + esc(l.email) + '</a>' : ''],
         ['Job address', l.address ? '<a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(l.address) + '" target="_blank" rel="noopener">' + esc(l.address) + '</a>' : ''],
         ['Town', l.address && l.address.toLowerCase().indexOf((l.town || '').toLowerCase()) !== -1 ? '' : esc(l.town)], ['Job', esc(l.service)], ['When', esc(l.timeframe)], ['Size', esc(l.size)],
+        ['Owns the property', esc(l.owns)], ['How ready', esc(l.intent)],
         ['Value', l.value ? euro(l.value) : ''], ['Source', esc(l.source)], ['Campaign', esc(l.campaign)],
         ['Page', l.page ? '<a href="' + esc(/^https?:/.test(l.page) ? l.page : 'https://' + l.page) + '" target="_blank" rel="noopener">' + esc(l.page.replace(/^https?:\/\//, '').slice(0, 60)) + '</a>' : ''],
         ['Added', esc(added)]

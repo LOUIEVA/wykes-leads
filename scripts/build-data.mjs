@@ -91,6 +91,14 @@ const fieldKey = Object.fromEntries((fieldsRes.customFields || []).map(f => [f.i
 const fieldName = Object.fromEntries((fieldsRes.customFields || []).map(f => [(f.fieldKey || '').replace(/^contact\./, ''), f.name || '']));
 // Fields used for routing or shown elsewhere on the card; everything else the lead filled in is listed under "Their enquiry".
 const HIDE_FIELDS = /^(owner_question_code|owner_answer|ballpark_(high|low)|utm_|fbclid|gclid|lead_page_url|town_or_eircode|service_requested|timeframe|job_size|job_message|job_details_message|ballpark_text|project_address|job_photo|owner_question)/;
+// Facebook lead form answers land in fields matched by name (keys differ per field), so find them by name.
+const keyByName = re => Object.keys(fieldName).find(k => re.test(fieldName[k])) || '';
+const FB = {
+  service: keyByName(/^service type$/i), length: keyByName(/fence length/i), timeframe: keyByName(/preferred time ?frame/i),
+  owns: keyByName(/owns? the property/i), intent: keyByName(/100% set|where are you at/i), form: keyByName(/facebook form name/i),
+};
+const FB_USED = new Set(Object.values(FB).filter(Boolean));
+const FB_META = /facebook (lead|form) id|lead submission details|^product type$|^page details$/i;
 const fieldText = v => Array.isArray(v) ? v.map(fieldText).filter(Boolean).join(', ') : (v && typeof v === 'object') ? Object.values(v).map(fieldText).filter(Boolean).join(', ') : String(v ?? '').trim();
 const photoUrls = v => { const out = []; const walk = x => { if (!x) return; if (typeof x === 'string') { (x.match(/https?:\/\/[^\s,"']+/g) || []).forEach(u => out.push(u)); } else if (Array.isArray(x)) x.forEach(walk); else if (typeof x === 'object') Object.entries(x).forEach(([k, y]) => { if (/^https?:/.test(k)) out.push(k); walk(y); }); }; walk(v); return [...new Set(out)].slice(0, 8); };
 const { pipelines = [] } = await api(`/opportunities/pipelines?locationId=${L}`);
@@ -264,22 +272,34 @@ for (const [i, c] of contacts.entries()) {
       try { const { contact = {} } = await api(`/contacts/${c.id}`); f = Object.fromEntries((contact.customFields || []).map(cf => [fieldKey[cf.id] || cf.id, cf.value ?? cf.fieldValue])); cc.fields = f; } catch (e) { console.warn('contact', e.message); }
     } else f = cc.fields;
   }
+  // Facebook lead form answers (fence type, length, timing, owner, how ready they are) and the ad they came from.
+  const pick = k => (k ? fieldText(f[k]) : '');
+  const at = c.attributionSource || {};
+  const adCampaign = [at.utmCampaign || at.campaign, at.utmContent || at.adName].filter(Boolean).join(' / ');
+  const fbForm = pick(FB.form) || (/facebook/i.test(c.source || at.utmSource || '') && /lead form/i.test(adCampaign) ? adCampaign : '');
+  const topic = /grass/i.test(fbForm) ? 'Artificial grass' : /fenc/i.test(fbForm) ? 'Fencing' : '';
+  const fbType = pick(FB.service);
   Object.assign(lead, {
-    town: short(f.town_or_eircode || c.city || '', 40), service: short(f.service_requested, 40), timeframe: short(f.timeframe, 30),
-    size: short(f.job_size, 40), message: short(f.job_message, 160), ballpark: short(f.ballpark_text, 60),
-    source: short(c.source || (c.attributionSource && (c.attributionSource.sessionSource || c.attributionSource.medium)) || f.utm_source || '', 30),
+    town: short(f.town_or_eircode || [c.city, c.postalCode].filter(Boolean).join(' ') || '', 40),
+    service: short((s => (s ? (topic === 'Fencing' && !/fenc|gate/i.test(s) ? `${s} fence` : s) : topic))(fieldText(f.service_requested) || fbType), 40),
+    timeframe: short(f.timeframe || pick(FB.timeframe), 30),
+    size: short(f.job_size || pick(FB.length), 40), message: short(f.job_message, 160), ballpark: short(f.ballpark_text, 60),
+    owns: short(pick(FB.owns), 20), intent: short(pick(FB.intent), 80),
+    source: short(c.source || at.sessionSource || at.medium || f.utm_source || '', 30),
   });
   // The full enquiry: job address, everything they wrote, every answered field, photos and where they came from.
   const street = [c.address1, c.city, c.postalCode].filter(Boolean).join(', ');
+  const addr = f.project_address ? [f.project_address, ...[c.city, c.postalCode].filter(x => x && !String(f.project_address).toLowerCase().includes(String(x).toLowerCase()))] : [];
   Object.assign(lead, {
-    address: short(f.project_address || street, 160),
+    address: short(f.project_address ? addr.join(', ') : street, 160),
     message: short(f.job_message || f.job_details_message || '', 1200),
     ownerQuestion: short(f.owner_question, 300),
     photos: photoUrls([f.job_photos, f.job_photo_uploads]),
-    campaign: short([f.utm_campaign, f.utm_content, f.utm_term].filter(Boolean).join(' / '), 120),
-    page: short(f.lead_page_url || (c.attributionSource && c.attributionSource.url) || '', 160),
-    answers: Object.entries(f).filter(([k, v]) => fieldName[k] && !HIDE_FIELDS.test(k) && fieldText(v)).slice(0, 25).map(([k, v]) => [short(fieldName[k], 60), short(fieldText(v), 400)]),
+    campaign: short([f.utm_campaign, f.utm_content, f.utm_term].filter(Boolean).join(' / ') || adCampaign, 120),
+    page: short(f.lead_page_url || at.url || '', 160),
+    answers: Object.entries(f).filter(([k, v]) => fieldName[k] && !HIDE_FIELDS.test(k) && !FB_USED.has(k) && !FB_META.test(fieldName[k]) && fieldText(v)).slice(0, 25).map(([k, v]) => [short(fieldName[k], 60), short(fieldText(v), 400)]),
   });
+  if (fbForm) lead.fbForm = topic ? `${topic} lead form` : 'Facebook lead form';
   if (i < DETAIL_LIMIT) {
     const strip = h => String(h || '').replace(/<br\s*\/?>(?!$)/gi, ' ').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
     const nList = notesByContact[c.id] || [];
@@ -328,7 +348,8 @@ for (const [i, c] of contacts.entries()) {
   const tagsAll = (c.tags || []).map(t => String(t).toLowerCase());
   const page = String((c.attributionSource && (c.attributionSource.url || c.attributionSource.referrer)) || (c.lastAttributionSource && c.lastAttributionSource.url) || '').toLowerCase();
   const chat = tagsAll.includes('website-chat-lead');
-  lead.channel = /wykes-lp-artificial|artificial|grass\./.test(page) ? (chat ? 'Grass page chat' : 'Grass landing page')
+  lead.channel = lead.fbForm ? lead.fbForm
+    : /wykes-lp-artificial|artificial|grass\./.test(page) ? (chat ? 'Grass page chat' : 'Grass landing page')
     : /wykes-lp-fencing|fencing\./.test(page) ? (chat ? 'Fencing page chat' : 'Fencing landing page')
     : chat ? 'Website chat or voice'
     : tagsAll.includes('website-lead') ? 'Website quote form'
@@ -337,7 +358,7 @@ for (const [i, c] of contacts.entries()) {
 
   // Service tags (service-fencing, service-artificial-grass, ...) from what they asked for and the page they came from.
   // Added once per lead, in one API call, so contacts can be filtered by service in GHL.
-  const svcText = `${f.service_requested || ''} ${f.job_message || ''} ${lead.channel}`.toLowerCase();
+  const svcText = `${f.service_requested || ''} ${lead.service || ''} ${f.job_message || ''} ${lead.channel}`.toLowerCase();
   const svcTags = [
     [/grass/, 'service-artificial-grass'],
     [/resin|driveway/, 'service-resin-driveway'],
