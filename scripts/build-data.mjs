@@ -117,12 +117,10 @@ for (let page = 1; page <= 20; page++) {
 const internal = c => (c.tags || []).some(t => /^(owner|internal|test|not-a-lead)$/i.test(t)) || /internal|not a lead/i.test(c.source || '');
 contacts = contacts.filter(c => !internal(c));
 // Fresh start (21 Nov 2026): the dashboard only shows leads created from FRESH_START on,
-// plus older contacts that come back (GHL tags anyone who replies "reactivated").
+// plus older contacts that come back (GHL tags anyone who replies "reactivated") or send a new enquiry.
 // Nothing is deleted in GHL; tag an old contact "show-on-dashboard" to bring it back by hand.
 const FRESH_START = ts(process.env.FRESH_START || '2026-11-21T08:10:00Z');
 const BACK_TAGS = ['reactivated', 'show-on-dashboard'];
-contacts = contacts.filter(c => ts(c.dateAdded) >= FRESH_START || (c.tags || []).some(t => BACK_TAGS.includes(String(t).toLowerCase())));
-contacts.sort((a, b) => ts(b.dateAdded) - ts(a.dateAdded));
 
 // 3. Every opportunity in every pipeline, latest one per contact
 let opps = [];
@@ -134,6 +132,14 @@ for (let page = 1; page <= 20; page++) {
 const oppByContact = {};
 opps.sort((a, b) => ts(b.updatedAt || b.createdAt) - ts(a.updatedAt || a.createdAt))
   .forEach(o => { const cid = o.contactId || (o.contact && o.contact.id); if (cid && !oppByContact[cid]) oppByContact[cid] = o; });
+
+// An older contact who sends a new enquiry (for example a Facebook lead form) gets a new
+// opportunity but keeps their old "date added". Count them from the new enquiry instead.
+const newOppAt = {};
+opps.forEach(o => { const cid = o.contactId || (o.contact && o.contact.id); const t = ts(o.createdAt); if (cid && t >= FRESH_START && t > (newOppAt[cid] || 0)) newOppAt[cid] = t; });
+contacts.forEach(c => { if (ts(c.dateAdded) < FRESH_START && newOppAt[c.id]) { c.firstAdded = c.dateAdded; c.dateAdded = new Date(newOppAt[c.id]).toISOString(); } });
+contacts = contacts.filter(c => ts(c.dateAdded) >= FRESH_START || (c.tags || []).some(t => BACK_TAGS.includes(String(t).toLowerCase())));
+contacts.sort((a, b) => ts(b.dateAdded) - ts(a.dateAdded));
 
 // 3b. Apply updates sent from the dashboard. They arrive as notes starting with "[Dashboard]"
 // (written by the GHL inbound-webhook workflow). Each is applied once, then rewritten with a tick.
