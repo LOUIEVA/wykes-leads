@@ -115,7 +115,18 @@ for (let page = 1; page <= 20; page++) {
 }
 // Not leads: the owner, internal/test contacts, and suppliers / job seekers / sales pitches the AI tagged not-a-lead
 const internal = c => (c.tags || []).some(t => /^(owner|internal|test|not-a-lead)$/i.test(t)) || /internal|not a lead/i.test(c.source || '');
-contacts = contacts.filter(c => !internal(c));
+// Louie's own test emails never show on the dashboard (stored as SHA-256 hashes, the repo is public).
+const BLOCKED_EMAIL_HASHES = new Set([
+  '6831c82ccaf8a319842f64d8955404dd9af43b618083dc5f3176f393d4336a90',
+  'e45b73cadef32cffe5d2cea1b49a27a482fc0e5dc31fd47bb12390829ac9c177',
+]);
+const sha256 = async t => Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t))).toString('hex');
+const blockedEmail = new Set();
+for (const c of contacts) {
+  const emails = [c.email, ...(c.additionalEmails || []).map(e => (e && e.email) || e)].filter(e => typeof e === 'string' && e);
+  for (const e of emails) if (BLOCKED_EMAIL_HASHES.has(await sha256(e.trim().toLowerCase()))) { blockedEmail.add(c.id); break; }
+}
+contacts = contacts.filter(c => !internal(c) && !blockedEmail.has(c.id));
 // Fresh start (21 Nov 2026): the dashboard only shows leads created from FRESH_START on,
 // plus older contacts that come back (GHL tags anyone who replies "reactivated") or send a new enquiry.
 // Nothing is deleted in GHL; tag an old contact "show-on-dashboard" to bring it back by hand.
