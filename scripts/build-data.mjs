@@ -508,6 +508,6 @@ await writeFile(`${OUT}/data.enc.json`, JSON.stringify({ v: 1, iter: ITER, salt:
 await saveCache();
 if (svcTagsAdded) console.log(`Added service tags to ${svcTagsAdded} lead(s)`);
 console.log(`Re-read notes for ${notesFetched} and details for ${detailsFetched} lead(s); the rest came from the cache.`);
-console.log(`Facebook lead form leads on the dashboard: ${leads.filter(l => l.fbForm).length} (${leads.filter(l => l.fbForm).map(l => [l.fbForm, l.size || '-', l.intent || '-'].join(' | ')).join('; ')}); returning contacts with a new enquiry: ${contacts.filter(c => c.firstAdded).length}`);
+console.log(`Facebook lead form leads on the dashboard: ${leads.filter(l => l.fbForm).length} (${leads.filter(l => l.fbForm).map(l => [l.fbForm, l.size || '-', l.intent || '-'].join(' | ')).join('; ')}); returning contacts with a new enquiry: ${contacts.filter(c => c.firstAdded).length}; hidden own-email contacts: ${blockedEmail.size}`);
 console.log(`OK: ${leads.length} leads (contacts), ${opps.length} deals in ${pipelines.length} pipelines, ${Object.keys(convByContact).length} conversations, ${reminders.length} open reminders, ${leads.reduce((n, l) => n + (l.noteCount || 0), 0)} notes, ${visits.length} upcoming visits, ${calls} API calls`);
 console.log('KPIs', JSON.stringify(kpis));
